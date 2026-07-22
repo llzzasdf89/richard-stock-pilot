@@ -1,0 +1,22 @@
+[project]
+name = "richard-stock-pilot-backend"
+version = "0.1.0"
+description = "FastAPI backend for Richard Stock Pilot"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.116.0",
+    "httpx>=0.28.0",
+    "longbridge>=0.2.96",
+    "pydantic>=2.11.0",
+    "python-dotenv>=1.0.0",
+    "sqlalchemy>=2.0.0",
+    "uvicorn>=0.35.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
