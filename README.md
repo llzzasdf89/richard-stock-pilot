@@ -33,22 +33,30 @@ Internal failures still return HTTP 200 with:
 }
 ```
 
-## Backend
+## Environment
 
-Create a local environment file:
+Create a root-level local environment file:
 
 ```bash
-cp backend/.env.example backend/.env
+cp .env.example .env
 ```
 
-Fill `backend/.env` with your Longbridge credentials:
+Fill `.env` with your Longbridge credentials:
 
 ```dotenv
+DATABASE_URL=sqlite:///./richard_stock_pilot.db
 LONGBRIDGE_APP_KEY=your app key
 LONGBRIDGE_APP_SECRET=your app secret
 LONGBRIDGE_ACCESS_TOKEN=your access token
 LONGBRIDGE_REGION=cn
+VITE_API_BASE=
 ```
+
+`VITE_API_BASE` may stay empty in local development because Vite proxies `/api` to the backend. Set it to the backend URL when deploying the frontend separately.
+
+Existing shell environment values take priority, so production deployments can still inject secrets without changing files. When credentials are available, `LongbridgeService` uses the official `longbridge` Python SDK. Without credentials, it falls back to deterministic mock data so local development still runs.
+
+## Backend
 
 ```bash
 cd backend
@@ -69,8 +77,6 @@ The backend uses an MVC layout:
 - `app/controllers`: API control logic.
 - `app/services`: Longbridge access and indicator calculations.
 
-Configuration is loaded from `.env` and `backend/.env`. Existing shell environment values take priority, so production deployments can still inject secrets without changing files. When credentials are available, `LongbridgeService` uses the official `longbridge` Python SDK. Without credentials, it falls back to deterministic mock data so local development still runs.
-
 Sync daily screening data for selected symbols:
 
 ```bash
@@ -81,14 +87,6 @@ uv run python -m app.scripts.sync_daily_screening --symbols AAPL.US 700.HK
 This command pulls static info, market cap, and daily candlesticks, computes BOLL metrics, and persists rows used by `GET /api/daily-screenings`.
 
 ## Frontend
-
-Create a local environment file:
-
-```bash
-cp frontend/.env.example frontend/.env
-```
-
-`VITE_API_BASE` may stay empty in local development because Vite proxies `/api` to the backend. Set it to the backend URL when deploying the frontend separately.
 
 ```bash
 cd frontend
