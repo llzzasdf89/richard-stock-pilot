@@ -61,6 +61,18 @@ class FakeSdk:
         TotalMarketValue = "total_market_value"
 
 
+def test_longbridge_service_treats_blank_credentials_as_unconfigured(monkeypatch):
+    monkeypatch.setenv("LONGBRIDGE_APP_KEY", "")
+    monkeypatch.setenv("LONGBRIDGE_APP_SECRET", "")
+    monkeypatch.setenv("LONGBRIDGE_ACCESS_TOKEN", "")
+
+    service = LongbridgeService()
+
+    bars = service.get_intraday_bars("AAPL.US", interval="5m", limit=30)
+    assert len(bars) == 30
+    assert bars[-1].close > bars[0].close
+
+
 def test_longbridge_service_maps_daily_candlesticks_from_sdk_context():
     context = FakeQuoteContext()
     service = LongbridgeService(quote_context=context, sdk=FakeSdk)

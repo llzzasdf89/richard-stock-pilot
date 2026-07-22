@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import os
 from typing import Any
+
+from app.config import load_environment
 
 
 @dataclass(frozen=True)
@@ -138,6 +141,16 @@ class LongbridgeService:
         }
 
     def _create_context(self) -> tuple[Any | None, Any | None]:
+        load_environment()
+        if not all(
+            os.getenv(name)
+            for name in (
+                "LONGBRIDGE_APP_KEY",
+                "LONGBRIDGE_APP_SECRET",
+                "LONGBRIDGE_ACCESS_TOKEN",
+            )
+        ):
+            return None, None
         try:
             from longbridge import openapi as sdk
 

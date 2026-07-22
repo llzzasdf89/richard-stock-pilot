@@ -35,6 +35,21 @@ Internal failures still return HTTP 200 with:
 
 ## Backend
 
+Create a local environment file:
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+Fill `backend/.env` with your Longbridge credentials:
+
+```dotenv
+LONGBRIDGE_APP_KEY=your app key
+LONGBRIDGE_APP_SECRET=your app secret
+LONGBRIDGE_ACCESS_TOKEN=your access token
+LONGBRIDGE_REGION=cn
+```
+
 ```bash
 cd backend
 uv run uvicorn app.main:app --reload
@@ -54,21 +69,7 @@ The backend uses an MVC layout:
 - `app/controllers`: API control logic.
 - `app/services`: Longbridge access and indicator calculations.
 
-Longbridge credentials are read from environment variables supported by the official SDK:
-
-```bash
-export LONGBRIDGE_APP_KEY="your app key"
-export LONGBRIDGE_APP_SECRET="your app secret"
-export LONGBRIDGE_ACCESS_TOKEN="your access token"
-```
-
-For mainland China routing, set:
-
-```bash
-export LONGBRIDGE_REGION="cn"
-```
-
-When credentials are available, `LongbridgeService` uses the official `longbridge` Python SDK. Without credentials, it falls back to deterministic mock data so local development still runs.
+Configuration is loaded from `.env` and `backend/.env`. Existing shell environment values take priority, so production deployments can still inject secrets without changing files. When credentials are available, `LongbridgeService` uses the official `longbridge` Python SDK. Without credentials, it falls back to deterministic mock data so local development still runs.
 
 Sync daily screening data for selected symbols:
 
@@ -80,6 +81,14 @@ uv run python -m app.scripts.sync_daily_screening --symbols AAPL.US 700.HK
 This command pulls static info, market cap, and daily candlesticks, computes BOLL metrics, and persists rows used by `GET /api/daily-screenings`.
 
 ## Frontend
+
+Create a local environment file:
+
+```bash
+cp frontend/.env.example frontend/.env
+```
+
+`VITE_API_BASE` may stay empty in local development because Vite proxies `/api` to the backend. Set it to the backend URL when deploying the frontend separately.
 
 ```bash
 cd frontend

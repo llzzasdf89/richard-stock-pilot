@@ -14,7 +14,15 @@ from app.models.stock import Stock
 from app.models.stock_metric import StockMetricDaily
 
 
-def build_client() -> tuple[TestClient, sessionmaker[Session]]:
+def build_client(monkeypatch=None) -> tuple[TestClient, sessionmaker[Session]]:
+    if monkeypatch is not None:
+        for name in (
+            "LONGBRIDGE_APP_KEY",
+            "LONGBRIDGE_APP_SECRET",
+            "LONGBRIDGE_ACCESS_TOKEN",
+        ):
+            monkeypatch.delenv(name, raising=False)
+
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -74,8 +82,8 @@ def seed_metric(session: Session) -> None:
     session.commit()
 
 
-def test_daily_screenings_return_unified_response_and_log_request():
-    client, session_factory = build_client()
+def test_daily_screenings_return_unified_response_and_log_request(monkeypatch):
+    client, session_factory = build_client(monkeypatch)
     with session_factory() as session:
         seed_metric(session)
 
@@ -107,8 +115,8 @@ def test_daily_screenings_return_unified_response_and_log_request():
         assert '"success":true' in log.response_body
 
 
-def test_intraday_screenings_compute_in_memory_and_do_not_require_persistence():
-    client, session_factory = build_client()
+def test_intraday_screenings_compute_in_memory_and_do_not_require_persistence(monkeypatch):
+    client, session_factory = build_client(monkeypatch)
     with session_factory() as session:
         seed_metric(session)
 
@@ -136,8 +144,8 @@ def test_intraday_screenings_compute_in_memory_and_do_not_require_persistence():
     assert body["data"]["results"][0]["latest_price"] > body["data"]["results"][0]["boll_upper"]
 
 
-def test_internal_errors_still_return_http_200_with_code_500():
-    client, _ = build_client()
+def test_internal_errors_still_return_http_200_with_code_500(monkeypatch):
+    client, _ = build_client(monkeypatch)
 
     response = client.get(
         "/api/daily-screenings",
@@ -152,8 +160,8 @@ def test_internal_errors_still_return_http_200_with_code_500():
     assert body["data"]["request_id"] == "req-error-1"
 
 
-def test_validation_errors_follow_unified_response_contract():
-    client, _ = build_client()
+def test_validation_errors_follow_unified_response_contract(monkeypatch):
+    client, _ = build_client(monkeypatch)
 
     response = client.get(
         "/api/daily-screenings",
