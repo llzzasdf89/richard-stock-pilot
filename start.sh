@@ -6,7 +6,12 @@ BACKEND_DIR="${ROOT_DIR}/backend"
 FRONTEND_DIR="${ROOT_DIR}/frontend"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
-DAILY_SYNC_BAR_COUNT="${DAILY_SYNC_BAR_COUNT:-60}"
+DAILY_SYNC_BAR_COUNT=60
+DAILY_SYNC_MARKETS="US HK"
+DAILY_SYNC_MIN_MARKET_CAP=50000000000
+DAILY_SYNC_MIN_AVG_VOLUME=1000000
+DAILY_SYNC_SOURCE=screener
+DAILY_SYNC_FORCE=1
 BACKEND_PID=""
 FRONTEND_PID=""
 
@@ -43,6 +48,11 @@ load_env_file() {
   source "${ROOT_DIR}/.env"
   set +a
   DAILY_SYNC_BAR_COUNT="${DAILY_SYNC_BAR_COUNT:-60}"
+  DAILY_SYNC_SOURCE="${DAILY_SYNC_SOURCE:-screener}"
+  DAILY_SYNC_MARKETS="${DAILY_SYNC_MARKETS:-US HK}"
+  DAILY_SYNC_MIN_MARKET_CAP="${DAILY_SYNC_MIN_MARKET_CAP:-50000000000}"
+  DAILY_SYNC_MIN_AVG_VOLUME="${DAILY_SYNC_MIN_AVG_VOLUME:-1000000}"
+  DAILY_SYNC_FORCE="${DAILY_SYNC_FORCE:-0}"
 }
 
 install_backend_dependencies() {
@@ -71,7 +81,7 @@ install_frontend_dependencies() {
 
 ensure_daily_screening_data() {
   log "检查当天日线筛选数据"
-  if (
+  if [ "${DAILY_SYNC_FORCE}" != "1" ] && (
     cd "${BACKEND_DIR}"
     UV_CACHE_DIR=.uv-cache uv run python -m app.scripts.has_daily_screening_data
   ); then
@@ -79,17 +89,31 @@ ensure_daily_screening_data() {
     return
   fi
 
-  if [ -z "${DAILY_SYNC_SYMBOLS:-}" ]; then
-    printf '当天日线筛选数据不存在，但 DAILY_SYNC_SYMBOLS 未配置，无法执行同步。\n' >&2
-    printf '请在根目录 .env 中配置，例如：DAILY_SYNC_SYMBOLS="AAPL.US 700.HK"\n' >&2
-    exit 1
+  log "当天日线筛选数据不存在，开始执行批处理同步"
+  if [ "${DAILY_SYNC_SOURCE}" = "symbols" ]; then
+    if [ -z "${DAILY_SYNC_SYMBOLS:-}" ]; then
+      printf 'DAILY_SYNC_SOURCE=symbols，但 DAILY_SYNC_SYMBOLS 未配置，无法执行同步。\n' >&2
+      exit 1
+    fi
+    # shellcheck disable=SC2086
+    if ! (
+      cd "${BACKEND_DIR}"
+      UV_CACHE_DIR=.uv-cache uv run python -m app.scripts.sync_daily_screening --bar-count "${DAILY_SYNC_BAR_COUNT}" --symbols ${DAILY_SYNC_SYMBOLS}
+    ); then
+      printf '日线批处理同步失败，停止启动程序。\n' >&2
+      exit 1
+    fi
+    return
   fi
 
-  log "当天日线筛选数据不存在，开始执行批处理同步"
   # shellcheck disable=SC2086
   if ! (
     cd "${BACKEND_DIR}"
-    UV_CACHE_DIR=.uv-cache uv run python -m app.scripts.sync_daily_screening --bar-count "${DAILY_SYNC_BAR_COUNT}" --symbols ${DAILY_SYNC_SYMBOLS}
+    UV_CACHE_DIR=.uv-cache uv run python -m app.scripts.sync_daily_screening \
+      --bar-count "${DAILY_SYNC_BAR_COUNT}" \
+      --markets ${DAILY_SYNC_MARKETS} \
+      --min-market-cap "${DAILY_SYNC_MIN_MARKET_CAP}" \
+      --min-avg-volume "${DAILY_SYNC_MIN_AVG_VOLUME}"
   ); then
     printf '日线批处理同步失败，停止启动程序。\n' >&2
     exit 1

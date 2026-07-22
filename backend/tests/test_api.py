@@ -12,6 +12,7 @@ from app.models.base import Base
 from app.models.request_log import RequestLog
 from app.models.stock import Stock
 from app.models.stock_metric import StockMetricDaily
+from app.services.longbridge_service import LatestQuote
 
 
 def build_client(monkeypatch=None) -> tuple[TestClient, sessionmaker[Session]]:
@@ -249,6 +250,13 @@ def test_intraday_screenings_passes_slider_filters_to_longbridge_screener(monkey
                 for index in range(limit)
             ]
 
+        def get_latest_quotes(self, symbols):
+            now = datetime(2026, 7, 22, 2, 30, tzinfo=timezone.utc)
+            return {
+                symbol: LatestQuote(symbol=symbol, price=208, previous_close=199, time=now, session="overnight")
+                for symbol in symbols
+            }
+
     monkeypatch.setattr("app.services.screening_service.LongbridgeService", lambda: FakeLongbridge())
     client, _ = build_client(monkeypatch)
 
@@ -271,6 +279,76 @@ def test_intraday_screenings_passes_slider_filters_to_longbridge_screener(monkey
     assert body["success"] is True
     assert screen_calls == [("US", Decimal("200000000000"), Decimal("10000000"))]
     assert call_symbols == ["AAPL.US"]
+
+
+def test_intraday_screenings_returns_previous_close_and_latest_session_price(monkeypatch):
+    class FakeLongbridge:
+        def screen_securities(self, market, min_market_cap, min_avg_volume):
+            from app.services.longbridge_service import Security
+
+            return [
+                Security(symbol="AAPL.US", name="Apple", market_cap=Decimal("3000000000000")),
+            ]
+
+        def get_daily_bars(self, symbol, count=30):
+            from app.services.longbridge_service import MarketDataBar
+
+            now = datetime.now(timezone.utc)
+            return [
+                MarketDataBar(
+                    time=now,
+                    open=100,
+                    high=101,
+                    low=99,
+                    close=100,
+                    volume=20_000_000,
+                    turnover=Decimal("100000000"),
+                )
+                for _ in range(25)
+            ]
+
+        def get_intraday_bars(self, symbol, interval="5m", limit=30):
+            from app.services.longbridge_service import IntradayBar
+
+            now = datetime.now(timezone.utc)
+            return [IntradayBar(time=now, close=200) for _ in range(limit)]
+
+        def get_latest_quotes(self, symbols):
+            now = datetime(2026, 7, 22, 2, 30, tzinfo=timezone.utc)
+            return {
+                symbol: LatestQuote(symbol=symbol, price=110, previous_close=99, time=now, session="overnight")
+                for symbol in symbols
+            }
+
+    monkeypatch.setattr("app.services.screening_service.LongbridgeService", lambda: FakeLongbridge())
+    client, _ = build_client(monkeypatch)
+
+    response = client.get(
+        "/api/intraday-screenings",
+        params={
+            "market": "US",
+            "signal_type": "upper_breakout",
+            "min_market_cap": "200000000000",
+            "min_avg_volume": "10000000",
+            "interval": "5m",
+            "page": 1,
+            "page_size": 10,
+        },
+        headers={"X-Request-ID": "req-intraday-latest-quote"},
+    )
+
+    body = response.json()
+    row = body["data"]["results"][0]
+    assert response.status_code == 200
+    assert body["success"] is True
+    assert body["data"]["total"] == 1
+    assert row["close"] == 99
+    assert row["latest_price"] == 110
+    assert row["boll_upper"] == 100
+    assert row["boll_mid"] == 100
+    assert row["boll_lower"] == 100
+    assert row["signal_type"] == "upper_breakout"
+    assert row["data_time"] == "2026-07-22T02:30:00+00:00"
 
 
 def test_internal_errors_still_return_http_200_with_code_500(monkeypatch):

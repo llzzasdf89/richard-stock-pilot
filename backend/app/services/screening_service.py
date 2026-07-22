@@ -166,11 +166,12 @@ def get_intraday_screenings(
             "total_pages": 0,
             "results": [],
         }
+    latest_quotes = provider.get_latest_quotes(symbols)
     results: list[dict[str, Any]] = []
     refreshed_at: str | None = None
     for security in securities:
         daily_bars = provider.get_daily_bars(security.symbol, count=30)
-        if not daily_bars:
+        if len(daily_bars) < 20:
             continue
         avg_volume = sum(bar.volume for bar in daily_bars[-20:]) / min(20, len(daily_bars))
         if Decimal(str(avg_volume)) < min_avg_volume:
@@ -179,19 +180,22 @@ def get_intraday_screenings(
         bars = provider.get_intraday_bars(security.symbol, interval=interval, limit=30)
         if len(bars) < 21:
             continue
-        refreshed_at = bars[-1].time.isoformat()
-        closes = [bar.close for bar in bars]
-        bands = calculate_bollinger(closes, period=20, std_multiplier=2)
-        previous = bands[-2]
+        latest_quote = latest_quotes.get(security.symbol)
+        previous_close = latest_quote.previous_close if latest_quote is not None else daily_bars[-1].close
+        latest_price = latest_quote.price if latest_quote is not None else bars[-1].close
+        latest_time = latest_quote.time if latest_quote is not None else bars[-1].time
+        refreshed_at = latest_time.isoformat()
+        daily_closes = [bar.close for bar in daily_bars]
+        bands = calculate_bollinger(daily_closes, period=20, std_multiplier=2)
         current = bands[-1]
-        if None in (previous["upper"], previous["lower"], current["upper"], current["lower"]):
+        if None in (current["upper"], current["lower"]):
             continue
         current_signal = detect_boll_signal(
-            prev_close=closes[-2],
-            close=closes[-1],
-            prev_upper=float(previous["upper"]),
+            prev_close=previous_close,
+            close=latest_price,
+            prev_upper=float(current["upper"]),
             upper=float(current["upper"]),
-            prev_lower=float(previous["lower"]),
+            prev_lower=float(current["lower"]),
             lower=float(current["lower"]),
         )
         if current_signal == "none" or (signal_type != "all" and signal_type != current_signal):
@@ -206,8 +210,8 @@ def get_intraday_screenings(
                 "signal_type": current_signal,
                 "interval": interval,
                 "latest_bar_time": bars[-1].time.isoformat(),
-                "close": closes[-1],
-                "latest_price": closes[-1],
+                "close": previous_close,
+                "latest_price": latest_price,
                 "market_cap": _to_float(security.market_cap),
                 "avg_volume_1m": avg_volume,
                 "boll_upper": current["upper"],
@@ -215,11 +219,11 @@ def get_intraday_screenings(
                 "boll_lower": current["lower"],
                 "break_percent": calculate_break_percent(
                     current_signal,
-                    close=closes[-1],
+                    close=latest_price,
                     upper=float(current["upper"]),
                     lower=float(current["lower"]),
                 ),
-                "data_time": bars[-1].time.isoformat(),
+                "data_time": latest_time.isoformat(),
             }
         )
 

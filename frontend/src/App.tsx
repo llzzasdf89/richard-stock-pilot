@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchDailyScreenings,
   fetchIntradayScreenings,
@@ -11,17 +11,16 @@ import {
 } from "./api";
 
 const DEFAULT_FILTERS: ScreeningFilters = {
-  market: "all",
+  market: "US",
   signal_type: "all",
   min_market_cap: 200_000_000_000,
   min_avg_volume: 10_000_000,
   interval: "5m",
   page: 1,
-  page_size: 50
+  page_size: 20
 };
 
 const marketOptions: Array<{ value: Market; label: string }> = [
-  { value: "all", label: "全部" },
   { value: "US", label: "美股" },
   { value: "HK", label: "港股" }
 ];
@@ -39,21 +38,38 @@ function App() {
   const [intradayData, setIntradayData] = useState<ScreeningPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const intradayRequestSeq = useRef(0);
 
   useEffect(() => {
     if (activeTab !== "daily") return;
 
+    let cancelled = false;
     const timer = window.setTimeout(() => {
       setLoading(true);
       setError(null);
       fetchDailyScreenings(filters)
-        .then(setDailyData)
-        .catch((err: Error) => setError(err.message))
-        .finally(() => setLoading(false));
+        .then((payload) => {
+          if (!cancelled) setDailyData(payload);
+        })
+        .catch((err: Error) => {
+          if (!cancelled) setError(err.message);
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
     }, 400);
 
-    return () => window.clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [activeTab, filters]);
+
+  useEffect(() => {
+    if (activeTab !== "intraday") return;
+
+    void requestIntraday(filters);
+  }, [activeTab]);
 
   const data = activeTab === "daily" ? dailyData : intradayData;
   const titleMeta = useMemo(() => {
@@ -64,20 +80,55 @@ function App() {
   }, [activeTab, dailyData, intradayData]);
 
   function updateFilters(next: Partial<ScreeningFilters>) {
-    setFilters((current) => ({ ...current, ...next, page: next.page ?? 1 }));
+    const nextFilters = { ...filters, ...next, page: next.page ?? 1 };
+    const changedKeys = Object.keys(next);
+    const isPageOnlyChange = changedKeys.length === 1 && changedKeys[0] === "page";
+    const shouldClearData = Object.keys(next).some((key) => key !== "page");
+    if (shouldClearData) {
+      intradayRequestSeq.current += 1;
+      setDailyData(null);
+      setIntradayData(null);
+      setError(null);
+    }
+    setFilters(nextFilters);
+    if (activeTab === "intraday" && isPageOnlyChange && intradayData) {
+      void requestIntraday(nextFilters);
+    }
   }
 
-  async function refreshIntraday() {
+  async function requestIntraday(nextFilters: ScreeningFilters) {
+    const requestSeq = ++intradayRequestSeq.current;
     setLoading(true);
     setError(null);
     try {
-      const payload = await fetchIntradayScreenings(filters);
-      setIntradayData(payload);
+      const payload = await fetchIntradayScreenings(nextFilters);
+      if (requestSeq === intradayRequestSeq.current) {
+        setIntradayData(payload);
+      }
     } catch (err) {
-      setError((err as Error).message);
+      if (requestSeq === intradayRequestSeq.current) {
+        setError((err as Error).message);
+      }
     } finally {
-      setLoading(false);
+      if (requestSeq === intradayRequestSeq.current) {
+        setLoading(false);
+      }
     }
+  }
+
+  async function refreshIntraday() {
+    await requestIntraday(filters);
+  }
+
+  function switchTab(nextTab: TabKey) {
+    if (nextTab === activeTab) return;
+
+    intradayRequestSeq.current += 1;
+    setError(null);
+    setDailyData(null);
+    setIntradayData(null);
+    setFilters(DEFAULT_FILTERS);
+    setActiveTab(nextTab);
   }
 
   return (
@@ -95,10 +146,10 @@ function App() {
 
       <section className="workspace">
         <div className="tabs" role="tablist" aria-label="筛选频道">
-          <button className={activeTab === "daily" ? "active" : ""} onClick={() => setActiveTab("daily")}>
+          <button className={activeTab === "daily" ? "active" : ""} onClick={() => switchTab("daily")}>
             日线筛选
           </button>
-          <button className={activeTab === "intraday" ? "active" : ""} onClick={() => setActiveTab("intraday")}>
+          <button className={activeTab === "intraday" ? "active" : ""} onClick={() => switchTab("intraday")}>
             分时筛选
           </button>
         </div>
@@ -143,7 +194,7 @@ function App() {
 
         {error && <div className="error-banner">{error}</div>}
 
-        <ScreeningTable rows={data?.results ?? []} loading={loading} />
+        <ScreeningTable rows={data?.results ?? []} loading={loading} activeTab={activeTab} />
 
         <footer className="pagination">
           <span>
@@ -212,25 +263,62 @@ function RangeFilter({
   formatter: (value: number) => string;
   onChange: (value: number) => void;
 }) {
+  const [draftValue, setDraftValue] = useState(value);
+  const debounceTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    setDraftValue(value);
+  }, [value]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimer.current !== null) {
+        window.clearTimeout(debounceTimer.current);
+      }
+    };
+  }, []);
+
+  function updateDraftValue(nextValue: number) {
+    setDraftValue(nextValue);
+    if (debounceTimer.current !== null) {
+      window.clearTimeout(debounceTimer.current);
+    }
+    debounceTimer.current = window.setTimeout(() => {
+      onChange(nextValue);
+    }, 600);
+  }
+
   return (
     <label className="range-filter">
       <span>
         {label}
-        <strong>{formatter(value)}</strong>
+        <strong>{formatter(draftValue)}</strong>
       </span>
       <input
         type="range"
         min={min}
         max={max}
         step={step}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
+        value={draftValue}
+        onChange={(event) => updateDraftValue(Number(event.target.value))}
       />
     </label>
   );
 }
 
-function ScreeningTable({ rows, loading }: { rows: ScreeningRow[]; loading: boolean }) {
+function ScreeningTable({
+  rows,
+  loading,
+  activeTab
+}: {
+  rows: ScreeningRow[];
+  loading: boolean;
+  activeTab: TabKey;
+}) {
+  const closeLabel = activeTab === "daily" ? "收盘价" : "昨日收盘价";
+  const showLatestPrice = activeTab === "intraday";
+  const emptyColSpan = showLatestPrice ? 14 : 13;
+
   return (
     <div className="table-wrap">
       <table>
@@ -241,8 +329,8 @@ function ScreeningTable({ rows, loading }: { rows: ScreeningRow[]; loading: bool
             <th>市场</th>
             <th>货币</th>
             <th>信号</th>
-            <th className="numeric">收盘价</th>
-            <th className="numeric">最新价格</th>
+            <th className="numeric">{closeLabel}</th>
+            {showLatestPrice && <th className="numeric">最新价格</th>}
             <th className="numeric">市值</th>
             <th className="numeric">月均成交量</th>
             <th className="numeric">BOLL 上轨价格</th>
@@ -263,7 +351,7 @@ function ScreeningTable({ rows, loading }: { rows: ScreeningRow[]; loading: bool
                 <span className={`signal ${row.signal_type}`}>{formatSignal(row.signal_type)}</span>
               </td>
               <td className="numeric">{formatPrice(row.close)}</td>
-              <td className="numeric">{formatPrice(row.latest_price)}</td>
+              {showLatestPrice && <td className="numeric">{formatPrice(row.latest_price)}</td>}
               <td className="numeric">{formatLargeMoney(row.market_cap)}</td>
               <td className="numeric">{formatVolume(row.avg_volume_1m)}</td>
               <td className="numeric">{formatPrice(row.boll_upper)}</td>
@@ -275,14 +363,14 @@ function ScreeningTable({ rows, loading }: { rows: ScreeningRow[]; loading: bool
           ))}
           {!loading && rows.length === 0 && (
             <tr>
-              <td colSpan={14} className="empty">
+              <td colSpan={emptyColSpan} className="empty">
                 暂无符合条件的股票
               </td>
             </tr>
           )}
           {loading && (
             <tr>
-              <td colSpan={14} className="empty">
+              <td colSpan={emptyColSpan} className="empty">
                 正在加载筛选结果
               </td>
             </tr>

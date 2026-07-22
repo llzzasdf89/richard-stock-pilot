@@ -1,4 +1,4 @@
-export type Market = "all" | "US" | "HK";
+export type Market = "US" | "HK";
 export type SignalType = "all" | "upper_breakout" | "lower_breakdown";
 export type TabKey = "daily" | "intraday";
 
