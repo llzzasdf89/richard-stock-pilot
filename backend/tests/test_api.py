@@ -182,10 +182,8 @@ def test_daily_screenings_use_latest_trade_date_per_market_when_market_is_all(mo
     assert symbols == {"AAPL.US", "700.HK"}
 
 
-def test_intraday_screenings_compute_in_memory_and_do_not_require_persistence(monkeypatch):
-    client, session_factory = build_client(monkeypatch)
-    with session_factory() as session:
-        seed_metric(session)
+def test_intraday_screenings_fetch_latest_market_data_without_daily_metrics(monkeypatch):
+    client, _ = build_client(monkeypatch)
 
     response = client.get(
         "/api/intraday-screenings",
@@ -209,6 +207,82 @@ def test_intraday_screenings_compute_in_memory_and_do_not_require_persistence(mo
     assert body["data"]["total"] == 1
     assert body["data"]["results"][0]["symbol"] == "AAPL.US"
     assert body["data"]["results"][0]["latest_price"] > body["data"]["results"][0]["boll_upper"]
+
+
+def test_intraday_screenings_filters_market_cap_before_fetching_intraday_bars(monkeypatch):
+    call_symbols: list[str] = []
+
+    class FakeLongbridge:
+        def list_securities(self, market):
+            from app.services.longbridge_service import Security
+
+            return [
+                Security(symbol="AAPL.US", name="Apple"),
+                Security(symbol="SMALL.US", name="Small Cap"),
+            ]
+
+        def get_static_info(self, symbols):
+            from app.services.longbridge_service import SecurityStaticInfo
+
+            return [
+                SecurityStaticInfo(symbol="AAPL.US", name="Apple", exchange="NASDAQ", currency="USD", lot_size=1),
+                SecurityStaticInfo(symbol="SMALL.US", name="Small Cap", exchange="NASDAQ", currency="USD", lot_size=1),
+            ]
+
+        def get_market_caps(self, symbols):
+            return {
+                "AAPL.US": Decimal("3000000000000"),
+                "SMALL.US": Decimal("10000000000"),
+            }
+
+        def get_daily_bars(self, symbol, count=30):
+            from app.services.longbridge_service import MarketDataBar
+
+            now = datetime.now(timezone.utc)
+            return [
+                MarketDataBar(
+                    time=now,
+                    open=100,
+                    high=101,
+                    low=99,
+                    close=100 + index,
+                    volume=20_000_000,
+                    turnover=Decimal("100000000"),
+                )
+                for index in range(25)
+            ]
+
+        def get_intraday_bars(self, symbol, interval="5m", limit=30):
+            from app.services.longbridge_service import IntradayBar
+
+            call_symbols.append(symbol)
+            now = datetime.now(timezone.utc)
+            return [
+                IntradayBar(time=now, close=200 + index * 0.2 if index < limit - 1 else 208)
+                for index in range(limit)
+            ]
+
+    monkeypatch.setattr("app.services.screening_service.LongbridgeService", lambda: FakeLongbridge())
+    client, _ = build_client(monkeypatch)
+
+    response = client.get(
+        "/api/intraday-screenings",
+        params={
+            "market": "US",
+            "signal_type": "all",
+            "min_market_cap": "200000000000",
+            "min_avg_volume": "10000000",
+            "interval": "5m",
+            "page": 1,
+            "page_size": 10,
+        },
+        headers={"X-Request-ID": "req-intraday-market-cap"},
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["success"] is True
+    assert call_symbols == ["AAPL.US"]
 
 
 def test_internal_errors_still_return_http_200_with_code_500(monkeypatch):

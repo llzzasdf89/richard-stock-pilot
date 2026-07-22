@@ -15,6 +15,7 @@ from app.services.indicator_service import (
     detect_boll_signal,
 )
 from app.services.longbridge_service import LongbridgeService
+from app.services.longbridge_service import SecurityStaticInfo
 
 
 def _to_float(value: Decimal | int | float | None) -> float | None:
@@ -90,6 +91,12 @@ def _latest_metric_base_statement(session: Session, market: str) -> tuple[Select
     )
 
 
+def _markets(market: str) -> list[str]:
+    if market == "all":
+        return ["US", "HK"]
+    return [market]
+
+
 def get_daily_screenings(
     session: Session,
     market: str,
@@ -139,26 +146,43 @@ def get_intraday_screenings(
     if page < 1 or page_size < 1:
         raise ValueError("page and page_size must be positive")
 
-    base, latest_date = _latest_metric_base_statement(session, market)
-    if base is None or latest_date is None:
+    provider = longbridge or LongbridgeService()
+    securities = [
+        security
+        for market_name in _markets(market)
+        for security in provider.list_securities(market_name)
+    ]
+    symbols = [security.symbol for security in securities]
+    if not symbols:
         return {
             "refreshed_at": None,
             "interval": interval,
             "page": page,
             "page_size": page_size,
             "total": 0,
+            "total_pages": 0,
             "results": [],
         }
 
-    provider = longbridge or LongbridgeService()
-    candidates = session.execute(
-        _apply_filters(base, market, "all", min_market_cap, min_avg_volume)
-    ).all()
+    static_info = {info.symbol: info for info in provider.get_static_info(symbols)}
+    market_caps = provider.get_market_caps(symbols)
 
     results: list[dict[str, Any]] = []
     refreshed_at: str | None = None
-    for stock, metric in candidates:
-        bars = provider.get_intraday_bars(stock.symbol, interval=interval, limit=30)
+    for symbol in symbols:
+        info = static_info.get(symbol)
+        market_cap = market_caps.get(symbol)
+        if info is None or market_cap is None or market_cap < min_market_cap:
+            continue
+
+        daily_bars = provider.get_daily_bars(symbol, count=30)
+        if not daily_bars:
+            continue
+        avg_volume = sum(bar.volume for bar in daily_bars[-20:]) / min(20, len(daily_bars))
+        if Decimal(str(avg_volume)) < min_avg_volume:
+            continue
+
+        bars = provider.get_intraday_bars(symbol, interval=interval, limit=30)
         if len(bars) < 21:
             continue
         refreshed_at = bars[-1].time.isoformat()
@@ -178,19 +202,20 @@ def get_intraday_screenings(
         )
         if current_signal == "none" or (signal_type != "all" and signal_type != current_signal):
             continue
+        row_market = "US" if symbol.endswith(".US") else "HK"
         results.append(
             {
-                "symbol": stock.symbol,
-                "name": stock.name,
-                "market": stock.market,
-                "currency": stock.currency,
+                "symbol": symbol,
+                "name": info.name,
+                "market": row_market,
+                "currency": _currency(symbol, info),
                 "signal_type": current_signal,
                 "interval": interval,
                 "latest_bar_time": bars[-1].time.isoformat(),
                 "close": closes[-1],
                 "latest_price": closes[-1],
-                "market_cap": _to_float(metric.market_cap),
-                "avg_volume_1m": _to_float(metric.avg_volume_1m),
+                "market_cap": _to_float(market_cap),
+                "avg_volume_1m": avg_volume,
                 "boll_upper": current["upper"],
                 "boll_mid": current["mid"],
                 "boll_lower": current["lower"],
@@ -216,3 +241,9 @@ def get_intraday_screenings(
         "total_pages": ceil(total / page_size) if total else 0,
         "results": results[start:end],
     }
+
+
+def _currency(symbol: str, info: SecurityStaticInfo) -> str:
+    if info.currency:
+        return info.currency
+    return "USD" if symbol.endswith(".US") else "HKD"
