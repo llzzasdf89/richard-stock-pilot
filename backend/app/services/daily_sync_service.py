@@ -1,0 +1,247 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.models.daily_bar import DailyBar
+from app.models.screening_run import ScreeningRun
+from app.models.stock import Stock
+from app.models.stock_metric import StockMetricDaily
+from app.services.indicator_service import (
+    calculate_bollinger,
+    calculate_break_percent,
+    detect_boll_signal,
+)
+from app.services.longbridge_service import LongbridgeService, MarketDataBar
+
+
+def sync_daily_screening(
+    session: Session,
+    symbols: list[str],
+    longbridge: LongbridgeService | None = None,
+    boll_period: int = 20,
+    boll_std_multiplier: Decimal = Decimal("2"),
+    bar_count: int = 60,
+) -> dict[str, Any]:
+    provider = longbridge or LongbridgeService()
+    now = datetime.now(timezone.utc)
+    run = ScreeningRun(
+        run_date=now.date(),
+        status="running",
+        markets="US,HK",
+        boll_period=boll_period,
+        boll_std_multiplier=boll_std_multiplier,
+        started_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(run)
+    session.flush()
+
+    metrics_count = 0
+    signal_count = 0
+    try:
+        static_info = {info.symbol: info for info in provider.get_static_info(symbols)}
+        market_caps = provider.get_market_caps(symbols)
+        for symbol in symbols:
+            info = static_info.get(symbol)
+            if info is None:
+                continue
+            stock = _upsert_stock(session, symbol, info, now)
+            bars = provider.get_daily_bars(symbol, count=bar_count)
+            if len(bars) < boll_period + 1:
+                continue
+            _upsert_daily_bars(session, stock.id, bars, now)
+            metric = _build_metric(
+                stock_id=stock.id,
+                bars=bars,
+                market_cap=market_caps.get(symbol),
+                boll_period=boll_period,
+                boll_std_multiplier=boll_std_multiplier,
+                now=now,
+            )
+            if metric is None:
+                continue
+            _upsert_metric(session, metric)
+            metrics_count += 1
+            if metric.signal_type != "none":
+                signal_count += 1
+
+        run.status = "success"
+        run.finished_at = datetime.now(timezone.utc)
+        run.stock_count = len(symbols)
+        run.metrics_count = metrics_count
+        run.signal_count = signal_count
+        run.updated_at = datetime.now(timezone.utc)
+        session.commit()
+        return {
+            "run_id": run.id,
+            "stock_count": len(symbols),
+            "metrics_count": metrics_count,
+            "signal_count": signal_count,
+        }
+    except Exception as exc:
+        run.status = "failed"
+        run.error_message = str(exc)
+        run.finished_at = datetime.now(timezone.utc)
+        run.updated_at = datetime.now(timezone.utc)
+        session.commit()
+        raise
+
+
+def _upsert_stock(session: Session, symbol: str, info: Any, now: datetime) -> Stock:
+    stock = session.scalar(select(Stock).where(Stock.symbol == symbol))
+    market = "US" if symbol.endswith(".US") else "HK"
+    if stock is None:
+        stock = Stock(
+            symbol=symbol,
+            name=info.name,
+            market=market,
+            currency=info.currency or ("USD" if market == "US" else "HKD"),
+            exchange=info.exchange,
+            lot_size=info.lot_size,
+            status="active",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(stock)
+        session.flush()
+        return stock
+
+    stock.name = info.name
+    stock.market = market
+    stock.currency = info.currency or stock.currency
+    stock.exchange = info.exchange
+    stock.lot_size = info.lot_size
+    stock.status = "active"
+    stock.updated_at = now
+    return stock
+
+
+def _upsert_daily_bars(session: Session, stock_id: int, bars: list[MarketDataBar], now: datetime) -> None:
+    for bar in bars:
+        trade_date = bar.time.date()
+        existing = session.scalar(
+            select(DailyBar).where(DailyBar.stock_id == stock_id, DailyBar.trade_date == trade_date)
+        )
+        if existing is None:
+            session.add(
+                DailyBar(
+                    stock_id=stock_id,
+                    trade_date=trade_date,
+                    open=Decimal(str(bar.open)),
+                    high=Decimal(str(bar.high)),
+                    low=Decimal(str(bar.low)),
+                    close=Decimal(str(bar.close)),
+                    volume=bar.volume,
+                    turnover=bar.turnover,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            continue
+        existing.open = Decimal(str(bar.open))
+        existing.high = Decimal(str(bar.high))
+        existing.low = Decimal(str(bar.low))
+        existing.close = Decimal(str(bar.close))
+        existing.volume = bar.volume
+        existing.turnover = bar.turnover
+        existing.updated_at = now
+
+
+def _build_metric(
+    stock_id: int,
+    bars: list[MarketDataBar],
+    market_cap: Decimal | None,
+    boll_period: int,
+    boll_std_multiplier: Decimal,
+    now: datetime,
+) -> StockMetricDaily | None:
+    if market_cap is None:
+        return None
+    closes = [bar.close for bar in bars]
+    bands = calculate_bollinger(closes, period=boll_period, std_multiplier=float(boll_std_multiplier))
+    prev_band = bands[-2]
+    current_band = bands[-1]
+    if None in (
+        prev_band["upper"],
+        prev_band["lower"],
+        current_band["mid"],
+        current_band["upper"],
+        current_band["lower"],
+    ):
+        return None
+    signal_type = detect_boll_signal(
+        prev_close=closes[-2],
+        close=closes[-1],
+        prev_upper=float(prev_band["upper"]),
+        upper=float(current_band["upper"]),
+        prev_lower=float(prev_band["lower"]),
+        lower=float(current_band["lower"]),
+    )
+    avg_volume = sum(bar.volume for bar in bars[-20:]) / min(20, len(bars))
+    return StockMetricDaily(
+        stock_id=stock_id,
+        trade_date=bars[-1].time.date(),
+        close=Decimal(str(closes[-1])),
+        market_cap=market_cap,
+        avg_volume_1m=Decimal(str(avg_volume)),
+        boll_period=boll_period,
+        boll_std_multiplier=boll_std_multiplier,
+        boll_mid=Decimal(str(current_band["mid"])),
+        boll_upper=Decimal(str(current_band["upper"])),
+        boll_lower=Decimal(str(current_band["lower"])),
+        prev_close=Decimal(str(closes[-2])),
+        prev_boll_upper=Decimal(str(prev_band["upper"])),
+        prev_boll_lower=Decimal(str(prev_band["lower"])),
+        signal_type=signal_type,
+        break_percent=_decimal_or_none(
+            calculate_break_percent(
+                signal_type,
+                close=closes[-1],
+                upper=float(current_band["upper"]),
+                lower=float(current_band["lower"]),
+            )
+        ),
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _upsert_metric(session: Session, metric: StockMetricDaily) -> None:
+    existing = session.scalar(
+        select(StockMetricDaily).where(
+            StockMetricDaily.stock_id == metric.stock_id,
+            StockMetricDaily.trade_date == metric.trade_date,
+            StockMetricDaily.boll_period == metric.boll_period,
+            StockMetricDaily.boll_std_multiplier == metric.boll_std_multiplier,
+        )
+    )
+    if existing is None:
+        session.add(metric)
+        return
+    for field in (
+        "close",
+        "market_cap",
+        "avg_volume_1m",
+        "boll_mid",
+        "boll_upper",
+        "boll_lower",
+        "prev_close",
+        "prev_boll_upper",
+        "prev_boll_lower",
+        "signal_type",
+        "break_percent",
+        "updated_at",
+    ):
+        setattr(existing, field, getattr(metric, field))
+
+
+def _decimal_or_none(value: float | None) -> Decimal | None:
+    if value is None:
+        return None
+    return Decimal(str(value))

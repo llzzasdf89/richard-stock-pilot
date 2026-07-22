@@ -54,7 +54,30 @@ The backend uses an MVC layout:
 - `app/controllers`: API control logic.
 - `app/services`: Longbridge access and indicator calculations.
 
-`LongbridgeService` currently returns deterministic intraday data so the app can run without credentials. Replace that service with real Longbridge SDK/API calls when credentials are ready.
+Longbridge credentials are read from environment variables supported by the official SDK:
+
+```bash
+export LONGBRIDGE_APP_KEY="your app key"
+export LONGBRIDGE_APP_SECRET="your app secret"
+export LONGBRIDGE_ACCESS_TOKEN="your access token"
+```
+
+For mainland China routing, set:
+
+```bash
+export LONGBRIDGE_REGION="cn"
+```
+
+When credentials are available, `LongbridgeService` uses the official `longbridge` Python SDK. Without credentials, it falls back to deterministic mock data so local development still runs.
+
+Sync daily screening data for selected symbols:
+
+```bash
+cd backend
+uv run python -m app.scripts.sync_daily_screening --symbols AAPL.US 700.HK
+```
+
+This command pulls static info, market cap, and daily candlesticks, computes BOLL metrics, and persists rows used by `GET /api/daily-screenings`.
 
 ## Frontend
 
