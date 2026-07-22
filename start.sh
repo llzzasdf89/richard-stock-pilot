@@ -87,10 +87,13 @@ ensure_daily_screening_data() {
 
   log "当天日线筛选数据不存在，开始执行批处理同步"
   # shellcheck disable=SC2086
-  (
+  if ! (
     cd "${BACKEND_DIR}"
     UV_CACHE_DIR=.uv-cache uv run python -m app.scripts.sync_daily_screening --bar-count "${DAILY_SYNC_BAR_COUNT}" --symbols ${DAILY_SYNC_SYMBOLS}
-  )
+  ); then
+    printf '日线批处理同步失败，停止启动程序。\n' >&2
+    exit 1
+  fi
 }
 
 start_backend() {
