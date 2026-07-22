@@ -13,6 +13,7 @@ The application uses a React frontend and a Python FastAPI backend.
 Frontend responsibilities:
 
 - Render a polished stock screening workspace.
+- Display all user-facing interface text in Chinese.
 - Provide tabs for daily and intraday screening.
 - Provide filters for market, signal type, market cap, and average monthly volume.
 - Generate an `X-Request-ID` for every API request.
@@ -71,10 +72,23 @@ The first screen is the actual screening workspace, not a landing page.
 Layout:
 
 - Compact top header with the product name and latest data timestamp.
-- Two tabs: daily screening and intraday screening.
+- Two tabs: `日线筛选` and `分时筛选`.
 - Filter toolbar with market, signal type, market cap slider, and average monthly volume slider.
 - Full-width results table.
 - No right-side chart or detail panel in the first version.
+
+All user-facing UI labels, table headers, empty states, loading text, errors, and button text are displayed in Chinese. API field names stay in English.
+
+Primary Chinese labels:
+
+- Market filter: `全部`, `美股`, `港股`.
+- Signal filter: `全部`, `上穿 BOLL`, `下击 BOLL`.
+- Market cap filter: `最低市值`.
+- Average volume filter: `最低月均成交量`.
+- Intraday refresh button: `刷新分时数据`.
+- Daily tab: `日线筛选`.
+- Intraday tab: `分时筛选`.
+- Table headers: `代码`, `名称`, `市场`, `货币`, `信号`, `收盘价`, `最新价`, `市值`, `月均成交量`, `BOLL 上轨`, `BOLL 中轨`, `BOLL 下轨`, `突破幅度`, `数据时间`.
 
 Filters:
 
