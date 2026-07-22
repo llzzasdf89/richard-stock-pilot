@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import create_engine, select
@@ -10,6 +10,7 @@ from app.models.screening_run import ScreeningRun
 from app.models.stock import Stock
 from app.models.stock_metric import StockMetricDaily
 from app.services.daily_sync_service import sync_daily_screening
+from app.services.daily_sync_service import has_daily_screening_data
 from app.services.longbridge_service import MarketDataBar, SecurityStaticInfo
 
 
@@ -69,3 +70,16 @@ def test_sync_daily_screening_persists_stock_bars_metrics_and_run():
     assert metric.signal_type == "upper_breakout"
     assert run.status == "success"
     assert run.signal_count == 1
+
+
+def test_has_daily_screening_data_checks_target_date():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+
+    assert has_daily_screening_data(session, date(2026, 7, 22)) is False
+
+    sync_daily_screening(session, ["AAPL.US"], longbridge=FakeLongbridge())
+
+    assert has_daily_screening_data(session, date(2026, 7, 21)) is True
+    assert has_daily_screening_data(session, date(2026, 7, 22)) is False

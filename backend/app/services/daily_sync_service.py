@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -17,6 +17,17 @@ from app.services.indicator_service import (
     detect_boll_signal,
 )
 from app.services.longbridge_service import LongbridgeService, MarketDataBar
+
+
+def has_daily_screening_data(session: Session, target_date: date) -> bool:
+    return (
+        session.scalar(
+            select(StockMetricDaily.id)
+            .where(StockMetricDaily.trade_date == target_date)
+            .limit(1)
+        )
+        is not None
+    )
 
 
 def sync_daily_screening(

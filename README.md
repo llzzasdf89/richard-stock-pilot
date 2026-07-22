@@ -49,6 +49,8 @@ LONGBRIDGE_APP_KEY=your app key
 LONGBRIDGE_APP_SECRET=your app secret
 LONGBRIDGE_ACCESS_TOKEN=your access token
 LONGBRIDGE_REGION=cn
+DAILY_SYNC_SYMBOLS="AAPL.US 700.HK"
+DAILY_SYNC_BAR_COUNT=60
 VITE_API_BASE=
 ```
 
@@ -64,7 +66,9 @@ Run both frontend and backend from the project root:
 ./start.sh
 ```
 
-The script creates `.env` from `.env.example` when missing, installs backend dependencies with `uv sync` when `backend/.venv` is absent, installs frontend dependencies with `npm install` when `frontend/node_modules` is absent, then starts FastAPI and Vite together.
+The script creates `.env` from `.env.example` when missing, installs backend dependencies with `uv sync` when `backend/.venv` is absent, installs frontend dependencies with `npm install` when `frontend/node_modules` is absent, checks whether today's daily screening data already exists, runs the daily sync batch when it is missing, then starts FastAPI and Vite together.
+
+`DAILY_SYNC_SYMBOLS` controls the symbols used by the startup sync batch. Keep symbols separated by spaces.
 
 Optional ports:
 

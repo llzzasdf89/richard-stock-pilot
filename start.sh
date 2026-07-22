@@ -6,6 +6,7 @@ BACKEND_DIR="${ROOT_DIR}/backend"
 FRONTEND_DIR="${ROOT_DIR}/frontend"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+DAILY_SYNC_BAR_COUNT="${DAILY_SYNC_BAR_COUNT:-60}"
 BACKEND_PID=""
 FRONTEND_PID=""
 
@@ -36,6 +37,14 @@ ensure_env_file() {
   fi
 }
 
+load_env_file() {
+  set -a
+  # shellcheck disable=SC1091
+  source "${ROOT_DIR}/.env"
+  set +a
+  DAILY_SYNC_BAR_COUNT="${DAILY_SYNC_BAR_COUNT:-60}"
+}
+
 install_backend_dependencies() {
   if [ ! -d "${BACKEND_DIR}/.venv" ]; then
     log "未发现后端虚拟环境，正在安装后端依赖"
@@ -58,6 +67,30 @@ install_frontend_dependencies() {
   else
     log "前端依赖已安装"
   fi
+}
+
+ensure_daily_screening_data() {
+  log "检查当天日线筛选数据"
+  if (
+    cd "${BACKEND_DIR}"
+    UV_CACHE_DIR=.uv-cache uv run python -m app.scripts.has_daily_screening_data
+  ); then
+    log "当天日线筛选数据已存在，跳过批处理同步"
+    return
+  fi
+
+  if [ -z "${DAILY_SYNC_SYMBOLS:-}" ]; then
+    printf '当天日线筛选数据不存在，但 DAILY_SYNC_SYMBOLS 未配置，无法执行同步。\n' >&2
+    printf '请在根目录 .env 中配置，例如：DAILY_SYNC_SYMBOLS="AAPL.US 700.HK"\n' >&2
+    exit 1
+  fi
+
+  log "当天日线筛选数据不存在，开始执行批处理同步"
+  # shellcheck disable=SC2086
+  (
+    cd "${BACKEND_DIR}"
+    UV_CACHE_DIR=.uv-cache uv run python -m app.scripts.sync_daily_screening --bar-count "${DAILY_SYNC_BAR_COUNT}" --symbols ${DAILY_SYNC_SYMBOLS}
+  )
 }
 
 start_backend() {
@@ -83,8 +116,10 @@ trap cleanup EXIT INT TERM
 require_command uv
 require_command npm
 ensure_env_file
+load_env_file
 install_backend_dependencies
 install_frontend_dependencies
+ensure_daily_screening_data
 start_backend
 start_frontend
 
