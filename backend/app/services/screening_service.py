@@ -15,7 +15,6 @@ from app.services.indicator_service import (
     detect_boll_signal,
 )
 from app.services.longbridge_service import LongbridgeService
-from app.services.longbridge_service import SecurityStaticInfo
 
 
 def _to_float(value: Decimal | int | float | None) -> float | None:
@@ -150,7 +149,11 @@ def get_intraday_screenings(
     securities = [
         security
         for market_name in _markets(market)
-        for security in provider.list_securities(market_name)
+        for security in provider.screen_securities(
+            market=market_name,
+            min_market_cap=min_market_cap,
+            min_avg_volume=min_avg_volume,
+        )
     ]
     symbols = [security.symbol for security in securities]
     if not symbols:
@@ -163,26 +166,17 @@ def get_intraday_screenings(
             "total_pages": 0,
             "results": [],
         }
-
-    static_info = {info.symbol: info for info in provider.get_static_info(symbols)}
-    market_caps = provider.get_market_caps(symbols)
-
     results: list[dict[str, Any]] = []
     refreshed_at: str | None = None
-    for symbol in symbols:
-        info = static_info.get(symbol)
-        market_cap = market_caps.get(symbol)
-        if info is None or market_cap is None or market_cap < min_market_cap:
-            continue
-
-        daily_bars = provider.get_daily_bars(symbol, count=30)
+    for security in securities:
+        daily_bars = provider.get_daily_bars(security.symbol, count=30)
         if not daily_bars:
             continue
         avg_volume = sum(bar.volume for bar in daily_bars[-20:]) / min(20, len(daily_bars))
         if Decimal(str(avg_volume)) < min_avg_volume:
             continue
 
-        bars = provider.get_intraday_bars(symbol, interval=interval, limit=30)
+        bars = provider.get_intraday_bars(security.symbol, interval=interval, limit=30)
         if len(bars) < 21:
             continue
         refreshed_at = bars[-1].time.isoformat()
@@ -202,19 +196,19 @@ def get_intraday_screenings(
         )
         if current_signal == "none" or (signal_type != "all" and signal_type != current_signal):
             continue
-        row_market = "US" if symbol.endswith(".US") else "HK"
+        row_market = "US" if security.symbol.endswith(".US") else "HK"
         results.append(
             {
-                "symbol": symbol,
-                "name": info.name,
+                "symbol": security.symbol,
+                "name": security.name,
                 "market": row_market,
-                "currency": _currency(symbol, info),
+                "currency": "USD" if security.symbol.endswith(".US") else "HKD",
                 "signal_type": current_signal,
                 "interval": interval,
                 "latest_bar_time": bars[-1].time.isoformat(),
                 "close": closes[-1],
                 "latest_price": closes[-1],
-                "market_cap": _to_float(market_cap),
+                "market_cap": _to_float(security.market_cap),
                 "avg_volume_1m": avg_volume,
                 "boll_upper": current["upper"],
                 "boll_mid": current["mid"],
@@ -241,9 +235,3 @@ def get_intraday_screenings(
         "total_pages": ceil(total / page_size) if total else 0,
         "results": results[start:end],
     }
-
-
-def _currency(symbol: str, info: SecurityStaticInfo) -> str:
-    if info.currency:
-        return info.currency
-    return "USD" if symbol.endswith(".US") else "HKD"

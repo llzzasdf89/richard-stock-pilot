@@ -45,6 +45,41 @@ class FakeQuoteContext:
         return [SimpleNamespace(symbol="700.HK", total_market_value=Decimal("3600000000000"))]
 
 
+class FakeScreenerContext:
+    def __init__(self):
+        self.calls = []
+
+    def screener_indicators(self):
+        self.calls.append(("screener_indicators",))
+        return SimpleNamespace(
+            data={
+                "groups": [
+                    {
+                        "group_name": "公司规模与财务",
+                        "indicators": [
+                            {"key": "marketcap", "name": "市值", "unit": "亿"},
+                            {"key": "volume", "name": "成交量", "unit": "股"},
+                        ],
+                    }
+                ]
+            }
+        )
+
+    def screener_search(self, market, strategy_id=None, conditions=None, show=None, page=0, size=20):
+        self.calls.append(("screener_search", market, strategy_id, conditions, show, page, size))
+        if page == 0:
+            return SimpleNamespace(
+                data={
+                    "total": 2,
+                    "items": [
+                        {"symbol": "AAPL.US", "name": "Apple"},
+                        {"symbol": "MSFT.US", "name": "Microsoft"},
+                    ],
+                }
+            )
+        return SimpleNamespace(data={"total": 2, "items": []})
+
+
 class FakeSdk:
     class Period:
         Day = "day"
@@ -59,6 +94,8 @@ class FakeSdk:
 
     class CalcIndex:
         TotalMarketValue = "total_market_value"
+
+    ScreenerCondition = staticmethod(lambda key, min="", max="", tech_values="{}": SimpleNamespace(key=key, min=min, max=max, tech_values=tech_values))
 
 
 def test_longbridge_service_treats_blank_credentials_as_unconfigured(monkeypatch):
@@ -115,3 +152,25 @@ def test_longbridge_service_fetches_market_cap_via_calc_indexes():
     market_caps = service.get_market_caps(["700.HK"])
 
     assert market_caps["700.HK"] == Decimal("3600000000000")
+
+
+def test_longbridge_service_discovers_screener_indicators_before_searching():
+    context = FakeScreenerContext()
+    service = LongbridgeService(screener_context=context, sdk=FakeSdk)
+
+    securities = service.screen_securities(
+        market="US",
+        min_market_cap=Decimal("200000000000"),
+        min_avg_volume=Decimal("10000000"),
+        page_size=50,
+    )
+
+    search_call = context.calls[1]
+    conditions = search_call[3]
+    assert context.calls[0] == ("screener_indicators",)
+    assert search_call[:3] == ("screener_search", "US", None)
+    assert [(condition.key, condition.min, condition.max) for condition in conditions] == [
+        ("marketcap", "2000", ""),
+        ("volume", "10000000", ""),
+    ]
+    assert [security.symbol for security in securities] == ["AAPL.US", "MSFT.US"]

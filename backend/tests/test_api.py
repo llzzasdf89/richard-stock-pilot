@@ -209,31 +209,18 @@ def test_intraday_screenings_fetch_latest_market_data_without_daily_metrics(monk
     assert body["data"]["results"][0]["latest_price"] > body["data"]["results"][0]["boll_upper"]
 
 
-def test_intraday_screenings_filters_market_cap_before_fetching_intraday_bars(monkeypatch):
+def test_intraday_screenings_passes_slider_filters_to_longbridge_screener(monkeypatch):
     call_symbols: list[str] = []
+    screen_calls: list[tuple[str, Decimal, Decimal]] = []
 
     class FakeLongbridge:
-        def list_securities(self, market):
+        def screen_securities(self, market, min_market_cap, min_avg_volume):
             from app.services.longbridge_service import Security
 
+            screen_calls.append((market, min_market_cap, min_avg_volume))
             return [
-                Security(symbol="AAPL.US", name="Apple"),
-                Security(symbol="SMALL.US", name="Small Cap"),
+                Security(symbol="AAPL.US", name="Apple", market_cap=Decimal("3000000000000")),
             ]
-
-        def get_static_info(self, symbols):
-            from app.services.longbridge_service import SecurityStaticInfo
-
-            return [
-                SecurityStaticInfo(symbol="AAPL.US", name="Apple", exchange="NASDAQ", currency="USD", lot_size=1),
-                SecurityStaticInfo(symbol="SMALL.US", name="Small Cap", exchange="NASDAQ", currency="USD", lot_size=1),
-            ]
-
-        def get_market_caps(self, symbols):
-            return {
-                "AAPL.US": Decimal("3000000000000"),
-                "SMALL.US": Decimal("10000000000"),
-            }
 
         def get_daily_bars(self, symbol, count=30):
             from app.services.longbridge_service import MarketDataBar
@@ -282,6 +269,7 @@ def test_intraday_screenings_filters_market_cap_before_fetching_intraday_bars(mo
     body = response.json()
     assert response.status_code == 200
     assert body["success"] is True
+    assert screen_calls == [("US", Decimal("200000000000"), Decimal("10000000"))]
     assert call_symbols == ["AAPL.US"]
 
 

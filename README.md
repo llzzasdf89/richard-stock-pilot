@@ -5,7 +5,7 @@ Richard Stock Pilot is a React + FastAPI stock screening app for US and HK stock
 ## Current Scope
 
 - Daily screening: reads stored daily metrics from SQLite.
-- Intraday screening: fetches the latest Longbridge market list, market cap, daily bars, and intraday bars on each request, then computes Bollinger signals in memory.
+- Intraday screening: discovers Longbridge screener indicators, runs screener search with the slider filters, then fetches daily and intraday bars for local Bollinger calculations.
 - Chinese UI.
 - Two application APIs:
   - `GET /api/daily-screenings`
@@ -106,7 +106,7 @@ uv run python -m app.scripts.sync_daily_screening --symbols AAPL.US 700.HK
 
 This command pulls static info, market cap, and daily candlesticks, computes BOLL metrics, and persists rows used by `GET /api/daily-screenings`.
 
-`GET /api/intraday-screenings` does not depend on the daily metric table. It builds its candidate list during each request from the latest Longbridge data, applies market cap and average volume filters, then calculates intraday BOLL signals without persistence.
+`GET /api/intraday-screenings` does not depend on the daily metric table. It calls Longbridge screener indicators first, maps the slider filters to screener conditions, runs screener search, then fetches bars for the returned candidates and calculates intraday BOLL signals without persistence.
 
 ## Frontend
 
