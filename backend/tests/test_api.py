@@ -22,6 +22,7 @@ def build_client(monkeypatch=None) -> tuple[TestClient, sessionmaker[Session]]:
             "LONGBRIDGE_ACCESS_TOKEN",
         ):
             monkeypatch.delenv(name, raising=False)
+        monkeypatch.setattr("app.services.longbridge_service.load_environment", lambda: None)
 
     engine = create_engine(
         "sqlite://",

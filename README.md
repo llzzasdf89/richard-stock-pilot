@@ -56,6 +56,22 @@ VITE_API_BASE=
 
 Existing shell environment values take priority, so production deployments can still inject secrets without changing files. When credentials are available, `LongbridgeService` uses the official `longbridge` Python SDK. Without credentials, it falls back to deterministic mock data so local development still runs.
 
+## Start
+
+Run both frontend and backend from the project root:
+
+```bash
+./start.sh
+```
+
+The script creates `.env` from `.env.example` when missing, installs backend dependencies with `uv sync` when `backend/.venv` is absent, installs frontend dependencies with `npm install` when `frontend/node_modules` is absent, then starts FastAPI and Vite together.
+
+Optional ports:
+
+```bash
+BACKEND_PORT=8001 FRONTEND_PORT=5174 ./start.sh
+```
+
 ## Backend
 
 ```bash
