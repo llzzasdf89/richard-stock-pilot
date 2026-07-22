@@ -4,7 +4,7 @@ from decimal import Decimal
 from math import ceil
 from typing import Any
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.stock import Stock
@@ -61,6 +61,35 @@ def _apply_filters(
     return statement
 
 
+def _latest_metric_dates_by_market(session: Session, market: str) -> list[tuple[str, Any]]:
+    statement = (
+        select(Stock.market, func.max(StockMetricDaily.trade_date))
+        .join(StockMetricDaily, StockMetricDaily.stock_id == Stock.id)
+        .group_by(Stock.market)
+    )
+    if market != "all":
+        statement = statement.where(Stock.market == market)
+    return [(row[0], row[1]) for row in session.execute(statement).all() if row[1] is not None]
+
+
+def _latest_metric_base_statement(session: Session, market: str) -> tuple[Select[tuple[Stock, StockMetricDaily]] | None, Any | None]:
+    latest_dates = _latest_metric_dates_by_market(session, market)
+    if not latest_dates:
+        return None, None
+
+    latest_conditions = [
+        and_(Stock.market == market_name, StockMetricDaily.trade_date == trade_date)
+        for market_name, trade_date in latest_dates
+    ]
+    latest_date = max(trade_date for _, trade_date in latest_dates)
+    return (
+        select(Stock, StockMetricDaily)
+        .join(StockMetricDaily, StockMetricDaily.stock_id == Stock.id)
+        .where(or_(*latest_conditions)),
+        latest_date,
+    )
+
+
 def get_daily_screenings(
     session: Session,
     market: str,
@@ -73,15 +102,10 @@ def get_daily_screenings(
     if page < 1 or page_size < 1:
         raise ValueError("page and page_size must be positive")
 
-    latest_date = session.scalar(select(func.max(StockMetricDaily.trade_date)))
-    if latest_date is None:
+    base, latest_date = _latest_metric_base_statement(session, market)
+    if base is None or latest_date is None:
         return {"data_date": None, "page": page, "page_size": page_size, "total": 0, "results": []}
 
-    base = (
-        select(Stock, StockMetricDaily)
-        .join(StockMetricDaily, StockMetricDaily.stock_id == Stock.id)
-        .where(StockMetricDaily.trade_date == latest_date)
-    )
     filtered = _apply_filters(base, market, signal_type, min_market_cap, min_avg_volume)
     count_statement = select(func.count()).select_from(filtered.subquery())
     total = session.scalar(count_statement) or 0
@@ -115,8 +139,8 @@ def get_intraday_screenings(
     if page < 1 or page_size < 1:
         raise ValueError("page and page_size must be positive")
 
-    latest_date = session.scalar(select(func.max(StockMetricDaily.trade_date)))
-    if latest_date is None:
+    base, latest_date = _latest_metric_base_statement(session, market)
+    if base is None or latest_date is None:
         return {
             "refreshed_at": None,
             "interval": interval,
@@ -127,11 +151,6 @@ def get_intraday_screenings(
         }
 
     provider = longbridge or LongbridgeService()
-    base = (
-        select(Stock, StockMetricDaily)
-        .join(StockMetricDaily, StockMetricDaily.stock_id == Stock.id)
-        .where(StockMetricDaily.trade_date == latest_date)
-    )
     candidates = session.execute(
         _apply_filters(base, market, "all", min_market_cap, min_avg_volume)
     ).all()

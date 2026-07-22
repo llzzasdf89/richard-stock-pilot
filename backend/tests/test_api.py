@@ -83,6 +83,46 @@ def seed_metric(session: Session) -> None:
     session.commit()
 
 
+def seed_cross_market_metrics(session: Session) -> None:
+    seed_metric(session)
+    now = datetime.now(timezone.utc)
+    stock = Stock(
+        symbol="700.HK",
+        name="腾讯控股",
+        market="HK",
+        currency="HKD",
+        exchange="HKEX",
+        lot_size=100,
+        status="active",
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(stock)
+    session.flush()
+    session.add(
+        StockMetricDaily(
+            stock_id=stock.id,
+            trade_date=date(2026, 7, 22),
+            close=Decimal("520.00"),
+            market_cap=Decimal("4000000000000"),
+            avg_volume_1m=Decimal("36000000"),
+            boll_period=20,
+            boll_std_multiplier=Decimal("2"),
+            boll_mid=Decimal("500.00"),
+            boll_upper=Decimal("515.00"),
+            boll_lower=Decimal("455.00"),
+            prev_close=Decimal("510.00"),
+            prev_boll_upper=Decimal("514.00"),
+            prev_boll_lower=Decimal("456.00"),
+            signal_type="upper_breakout",
+            break_percent=Decimal("0.009709"),
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    session.commit()
+
+
 def test_daily_screenings_return_unified_response_and_log_request(monkeypatch):
     client, session_factory = build_client(monkeypatch)
     with session_factory() as session:
@@ -114,6 +154,32 @@ def test_daily_screenings_return_unified_response_and_log_request(monkeypatch):
         assert log.response_status == 200
         assert "min_market_cap=200000000000" in log.query_params
         assert '"success":true' in log.response_body
+
+
+def test_daily_screenings_use_latest_trade_date_per_market_when_market_is_all(monkeypatch):
+    client, session_factory = build_client(monkeypatch)
+    with session_factory() as session:
+        seed_cross_market_metrics(session)
+
+    response = client.get(
+        "/api/daily-screenings",
+        params={
+            "market": "all",
+            "signal_type": "all",
+            "min_market_cap": "200000000000",
+            "min_avg_volume": "10000000",
+            "page": 1,
+            "page_size": 20,
+        },
+        headers={"X-Request-ID": "req-daily-cross-market"},
+    )
+
+    body = response.json()
+    symbols = {row["symbol"] for row in body["data"]["results"]}
+    assert response.status_code == 200
+    assert body["success"] is True
+    assert body["data"]["total"] == 2
+    assert symbols == {"AAPL.US", "700.HK"}
 
 
 def test_intraday_screenings_compute_in_memory_and_do_not_require_persistence(monkeypatch):
