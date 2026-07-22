@@ -88,7 +88,7 @@ Primary Chinese labels:
 - Intraday refresh button: `刷新分时数据`.
 - Daily tab: `日线筛选`.
 - Intraday tab: `分时筛选`.
-- Table headers: `代码`, `名称`, `市场`, `货币`, `信号`, `收盘价`, `最新价格`, `市值`, `月均成交量`, `BOLL 上轨`, `BOLL 中轨`, `BOLL 下轨`, `突破幅度`, `数据时间`.
+- Table headers: `代码`, `名称`, `市场`, `货币`, `信号`, `收盘价`, `最新价格`, `市值`, `月均成交量`, `BOLL 上轨价格`, `BOLL 中轨价格`, `BOLL 下轨价格`, `突破幅度`, `数据时间`.
 
 Filters:
 
@@ -136,7 +136,8 @@ Behavior:
 - Query `stock_metrics_daily` joined with `stocks`.
 - Apply market, signal type, market cap, average volume, and pagination filters.
 - Return daily Bollinger Band screening rows.
-- Include a `latest_price` field for the table's `最新价格` column when available.
+- Include `boll_upper`, `boll_mid`, and `boll_lower` fields for the Bollinger Band upper, middle, and lower rail prices.
+- In daily screening results, fill the table's `最新价格` column with the daily close price. Do not fetch realtime quotes for this column.
 - Do not call Longbridge from this endpoint during normal filtering.
 
 ### Intraday Screenings
@@ -164,6 +165,7 @@ Behavior:
 - Compute Bollinger Band signals in memory.
 - Return matching rows.
 - Include a `latest_price` field from the current intraday calculation.
+- Include `boll_upper`, `boll_mid`, and `boll_lower` fields for the current intraday Bollinger Band upper, middle, and lower rail prices.
 - Do not store intraday bars, intraday metrics, or intraday screening results.
 
 ## Unified Response Format
