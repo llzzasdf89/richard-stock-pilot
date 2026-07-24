@@ -1,5 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+import os
+import sys
 from types import SimpleNamespace
 
 from app.services.longbridge_service import LongbridgeService
@@ -160,6 +162,32 @@ def test_longbridge_service_treats_blank_credentials_as_unconfigured(monkeypatch
     bars = service.get_intraday_bars("AAPL.US", interval="5m", limit=30)
     assert len(bars) == 30
     assert bars[-1].close > bars[0].close
+
+
+def test_longbridge_service_enables_overnight_quotes_by_default(monkeypatch):
+    monkeypatch.setenv("LONGBRIDGE_APP_KEY", "key")
+    monkeypatch.setenv("LONGBRIDGE_APP_SECRET", "secret")
+    monkeypatch.setenv("LONGBRIDGE_ACCESS_TOKEN", "token")
+    monkeypatch.delenv("LONGBRIDGE_ENABLE_OVERNIGHT", raising=False)
+    observed = {}
+
+    class Config:
+        @staticmethod
+        def from_apikey_env():
+            observed["enable_overnight"] = os.getenv("LONGBRIDGE_ENABLE_OVERNIGHT")
+            return object()
+
+    fake_openapi = SimpleNamespace(
+        Config=Config,
+        QuoteContext=lambda config: object(),
+        ScreenerContext=lambda config: object(),
+        CalendarContext=lambda config: object(),
+    )
+    monkeypatch.setitem(sys.modules, "longbridge", SimpleNamespace(openapi=fake_openapi))
+
+    LongbridgeService()
+
+    assert observed["enable_overnight"] == "true"
 
 
 def test_longbridge_service_maps_daily_candlesticks_from_sdk_context():

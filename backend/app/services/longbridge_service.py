@@ -337,6 +337,7 @@ class LongbridgeService:
         try:
             from longbridge import openapi as sdk
 
+            os.environ.setdefault("LONGBRIDGE_ENABLE_OVERNIGHT", "true")
             config = sdk.Config.from_apikey_env()
             return sdk.QuoteContext(config), sdk.ScreenerContext(config), sdk.CalendarContext(config), sdk
         except Exception:
