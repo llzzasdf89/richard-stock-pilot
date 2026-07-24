@@ -29,6 +29,7 @@ def _metric_row(stock: Stock, metric: StockMetricDaily) -> dict[str, Any]:
         "market": stock.market,
         "currency": stock.currency,
         "signal_type": metric.signal_type,
+        "earnings_date": stock.earnings_date.isoformat() if stock.earnings_date is not None else None,
         "trade_date": metric.trade_date.isoformat(),
         "close": close,
         "latest_price": close,
@@ -94,6 +95,29 @@ def _markets(market: str) -> list[str]:
     if market == "all":
         return ["US", "HK"]
     return [market]
+
+
+def _symbol_market(symbol: str) -> str:
+    if symbol.endswith(".US"):
+        return "US"
+    if symbol.endswith(".HK"):
+        return "HK"
+    raise ValueError(f"unsupported security symbol market: {symbol}")
+
+
+def _get_earnings_dates(provider: LongbridgeService, symbols: list[str], market: str) -> dict[str, Any]:
+    get_dates = getattr(provider, "get_earnings_dates", None)
+    if get_dates is None:
+        return {}
+    if market != "all":
+        return get_dates(symbols, market=market)
+
+    earnings_dates: dict[str, Any] = {}
+    for market_name in _markets(market):
+        market_symbols = [symbol for symbol in symbols if _symbol_market(symbol) == market_name]
+        if market_symbols:
+            earnings_dates.update(get_dates(market_symbols, market=market_name))
+    return earnings_dates
 
 
 def get_daily_screenings(
@@ -167,6 +191,7 @@ def get_intraday_screenings(
             "results": [],
         }
     latest_quotes = provider.get_latest_quotes(symbols)
+    earnings_dates = _get_earnings_dates(provider, symbols, market)
     results: list[dict[str, Any]] = []
     refreshed_at: str | None = None
     for security in securities:
@@ -208,6 +233,9 @@ def get_intraday_screenings(
                 "market": row_market,
                 "currency": "USD" if security.symbol.endswith(".US") else "HKD",
                 "signal_type": current_signal,
+                "earnings_date": earnings_dates.get(security.symbol).isoformat()
+                if earnings_dates.get(security.symbol) is not None
+                else None,
                 "interval": interval,
                 "latest_bar_time": bars[-1].time.isoformat(),
                 "close": previous_close,

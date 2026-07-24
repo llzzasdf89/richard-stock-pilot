@@ -317,7 +317,7 @@ function ScreeningTable({
 }) {
   const closeLabel = activeTab === "daily" ? "收盘价" : "昨日收盘价";
   const showLatestPrice = activeTab === "intraday";
-  const emptyColSpan = showLatestPrice ? 14 : 13;
+  const emptyColSpan = showLatestPrice ? 15 : 14;
 
   return (
     <div className="table-wrap">
@@ -329,6 +329,7 @@ function ScreeningTable({
             <th>市场</th>
             <th>货币</th>
             <th>信号</th>
+            <th>近期财报日期（未来几天内）</th>
             <th className="numeric">{closeLabel}</th>
             {showLatestPrice && <th className="numeric">最新价格</th>}
             <th className="numeric">市值</th>
@@ -350,6 +351,7 @@ function ScreeningTable({
               <td>
                 <span className={`signal ${row.signal_type}`}>{formatSignal(row.signal_type)}</span>
               </td>
+              <td>{row.earnings_date ?? "-"}</td>
               <td className="numeric">{formatPrice(row.close)}</td>
               {showLatestPrice && <td className="numeric">{formatPrice(row.latest_price)}</td>}
               <td className="numeric">{formatLargeMoney(row.market_cap)}</td>

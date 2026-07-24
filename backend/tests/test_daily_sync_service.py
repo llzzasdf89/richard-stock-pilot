@@ -15,6 +15,9 @@ from app.services.longbridge_service import MarketDataBar, SecurityStaticInfo
 
 
 class FakeLongbridge:
+    def __init__(self):
+        self.earnings_date_calls = []
+
     def get_static_info(self, symbols):
         return [
             SecurityStaticInfo(
@@ -28,6 +31,11 @@ class FakeLongbridge:
 
     def get_market_caps(self, symbols):
         return {"AAPL.US": Decimal("3200000000000")}
+
+    def get_earnings_dates(self, symbols, market, reference_date):
+        self.earnings_date_calls.append((symbols, market, reference_date))
+        assert market == "US"
+        return {"AAPL.US": date(2026, 7, 23)}
 
     def get_daily_bars(self, symbol, count=60):
         start = datetime(2026, 6, 27, tzinfo=timezone.utc)
@@ -55,7 +63,8 @@ def test_sync_daily_screening_persists_stock_bars_metrics_and_run():
     Base.metadata.create_all(engine)
     session = Session(engine)
 
-    result = sync_daily_screening(session, ["AAPL.US"], longbridge=FakeLongbridge())
+    longbridge = FakeLongbridge()
+    result = sync_daily_screening(session, ["AAPL.US"], longbridge=longbridge)
 
     stock = session.scalar(select(Stock).where(Stock.symbol == "AAPL.US"))
     metric = session.scalar(select(StockMetricDaily).where(StockMetricDaily.stock_id == stock.id))
@@ -64,6 +73,8 @@ def test_sync_daily_screening_persists_stock_bars_metrics_and_run():
 
     assert result["stock_count"] == 1
     assert stock.currency == "USD"
+    assert stock.earnings_date == date(2026, 7, 23)
+    assert longbridge.earnings_date_calls == [(["AAPL.US"], "US", date(2026, 7, 21))]
     assert len(bars) == 25
     assert metric.market_cap == Decimal("3200000000000")
     assert metric.avg_volume_1m > 20_000_000

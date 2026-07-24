@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -114,6 +114,21 @@ class FakeScreenerContext:
         return SimpleNamespace(data={"total": 2, "items": []})
 
 
+class FakeCalendarContext:
+    def __init__(self):
+        self.calls = []
+
+    def finance_calendar(self, category, start, end, market=None):
+        self.calls.append(("finance_calendar", category, start, end, market))
+        return SimpleNamespace(
+            data=[
+                SimpleNamespace(symbol="AAPL.US", date="Today 2026.08.18 (EST)"),
+                SimpleNamespace(symbol="MSFT.US", date=None, datetime="1787179200"),
+                SimpleNamespace(symbol="TSLA.US", date="2026.08.19 (EST)"),
+            ]
+        )
+
+
 class FakeSdk:
     class Period:
         Day = "day"
@@ -128,6 +143,9 @@ class FakeSdk:
 
     class CalcIndex:
         TotalMarketValue = "total_market_value"
+
+    class CalendarCategory:
+        Report = "report"
 
     ScreenerCondition = staticmethod(lambda key, min="", max="", tech_values="{}": SimpleNamespace(key=key, min=min, max=max, tech_values=tech_values))
 
@@ -230,6 +248,22 @@ def test_longbridge_service_batches_static_info_and_market_cap_symbol_requests()
     assert infos[-1].symbol == "TEST104.US"
     assert len(market_caps) == 105
     assert market_caps["TEST104.US"] == Decimal("3600000000000")
+
+
+def test_longbridge_service_gets_earnings_dates_from_single_daily_calendar_call():
+    context = FakeCalendarContext()
+    service = LongbridgeService(calendar_context=context, sdk=FakeSdk)
+
+    earnings_dates = service.get_earnings_dates(
+        ["AAPL.US", "WMT.US"],
+        market="US",
+        reference_date=date(2026, 8, 18),
+    )
+
+    assert context.calls == [
+        ("finance_calendar", "report", "2026-08-18", "2026-08-18", "US"),
+    ]
+    assert earnings_dates == {"AAPL.US": date(2026, 8, 18)}
 
 
 def test_longbridge_service_discovers_screener_indicators_before_searching():

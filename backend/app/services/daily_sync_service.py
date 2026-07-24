@@ -58,12 +58,20 @@ def sync_daily_screening(
     try:
         static_info = {info.symbol: info for info in provider.get_static_info(symbols)}
         market_caps = provider.get_market_caps(symbols)
+        bars_by_symbol: dict[str, list[MarketDataBar]] = {}
+        reference_dates: dict[str, date] = {}
+        for symbol in symbols:
+            bars = provider.get_daily_bars(symbol, count=bar_count)
+            bars_by_symbol[symbol] = bars
+            if bars:
+                reference_dates[symbol] = bars[-1].time.date()
+        earnings_dates = _get_earnings_dates(provider, symbols, reference_dates)
         for symbol in symbols:
             info = static_info.get(symbol)
             if info is None:
                 continue
-            stock = _upsert_stock(session, symbol, info, now)
-            bars = provider.get_daily_bars(symbol, count=bar_count)
+            stock = _upsert_stock(session, symbol, info, earnings_dates.get(symbol), now)
+            bars = bars_by_symbol.get(symbol, [])
             if len(bars) < boll_period + 1:
                 continue
             _upsert_daily_bars(session, stock.id, bars, now)
@@ -104,7 +112,25 @@ def sync_daily_screening(
         raise
 
 
-def _upsert_stock(session: Session, symbol: str, info: Any, now: datetime) -> Stock:
+def _get_earnings_dates(
+    provider: LongbridgeService,
+    symbols: list[str],
+    reference_dates: dict[str, date],
+) -> dict[str, date]:
+    get_dates = getattr(provider, "get_earnings_dates", None)
+    if get_dates is None:
+        return {}
+    earnings_dates: dict[str, date] = {}
+    for market in ("US", "HK"):
+        market_symbols = [symbol for symbol in symbols if symbol.endswith(f".{market}") and symbol in reference_dates]
+        dates = sorted({reference_dates[symbol] for symbol in market_symbols})
+        for reference_date in dates:
+            date_symbols = [symbol for symbol in market_symbols if reference_dates[symbol] == reference_date]
+            earnings_dates.update(get_dates(date_symbols, market=market, reference_date=reference_date))
+    return earnings_dates
+
+
+def _upsert_stock(session: Session, symbol: str, info: Any, earnings_date: date | None, now: datetime) -> Stock:
     stock = session.scalar(select(Stock).where(Stock.symbol == symbol))
     market = "US" if symbol.endswith(".US") else "HK"
     if stock is None:
@@ -116,6 +142,7 @@ def _upsert_stock(session: Session, symbol: str, info: Any, now: datetime) -> St
             exchange=info.exchange,
             lot_size=info.lot_size,
             status="active",
+            earnings_date=earnings_date,
             created_at=now,
             updated_at=now,
         )
@@ -129,6 +156,7 @@ def _upsert_stock(session: Session, symbol: str, info: Any, now: datetime) -> St
     stock.exchange = info.exchange
     stock.lot_size = info.lot_size
     stock.status = "active"
+    stock.earnings_date = earnings_date
     stock.updated_at = now
     return stock
 
