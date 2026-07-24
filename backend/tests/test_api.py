@@ -55,6 +55,7 @@ def seed_metric(session: Session) -> None:
         exchange="NASDAQ",
         lot_size=1,
         status="active",
+        earnings_date=date(2026, 7, 23),
         created_at=now,
         updated_at=now,
     )
@@ -144,6 +145,7 @@ def test_daily_screenings_return_unified_response_and_log_request(monkeypatch):
     assert body["data"]["total"] == 1
     assert row["symbol"] == "AAPL.US"
     assert row["latest_price"] == row["close"] == 210.5
+    assert row["earnings_date"] == "2026-07-23"
     assert row["boll_upper"] == 208
     assert row["boll_mid"] == 200
     assert row["boll_lower"] == 192
@@ -282,6 +284,8 @@ def test_intraday_screenings_passes_slider_filters_to_longbridge_screener(monkey
 
 
 def test_intraday_screenings_returns_previous_close_and_latest_session_price(monkeypatch):
+    earnings_calls: list[tuple[list[str], str]] = []
+
     class FakeLongbridge:
         def screen_securities(self, market, min_market_cap, min_avg_volume):
             from app.services.longbridge_service import Security
@@ -320,6 +324,10 @@ def test_intraday_screenings_returns_previous_close_and_latest_session_price(mon
                 for symbol in symbols
             }
 
+        def get_earnings_dates(self, symbols, market):
+            earnings_calls.append((list(symbols), market))
+            return {"AAPL.US": date(2026, 7, 23)}
+
     monkeypatch.setattr("app.services.screening_service.LongbridgeService", lambda: FakeLongbridge())
     client, _ = build_client(monkeypatch)
 
@@ -348,7 +356,9 @@ def test_intraday_screenings_returns_previous_close_and_latest_session_price(mon
     assert row["boll_mid"] == 100
     assert row["boll_lower"] == 100
     assert row["signal_type"] == "upper_breakout"
+    assert row["earnings_date"] == "2026-07-23"
     assert row["data_time"] == "2026-07-22T02:30:00+00:00"
+    assert earnings_calls == [(["AAPL.US"], "US")]
 
 
 def test_internal_errors_still_return_http_200_with_code_500(monkeypatch):

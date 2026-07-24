@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import os
+import re
 import time
 from typing import Any, Callable
 
@@ -11,6 +12,7 @@ from app.config import load_environment
 
 
 SYMBOL_BATCH_SIZE = 50
+_FINANCE_CALENDAR_CACHE: dict[tuple[str, date, date], list[Any]] = {}
 
 
 @dataclass(frozen=True)
@@ -75,20 +77,25 @@ class LongbridgeService:
         self,
         quote_context: Any | None = None,
         screener_context: Any | None = None,
+        calendar_context: Any | None = None,
         sdk: Any | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
+        has_injected_calendar_context = calendar_context is not None
         self._sdk = sdk
         self._quote_context = quote_context
         self._screener_context = screener_context
+        self._calendar_context = calendar_context
         self._sleep = sleep
         self._retry_attempts = int(os.getenv("LONGBRIDGE_RETRY_ATTEMPTS", "4"))
         self._retry_delay_seconds = float(os.getenv("LONGBRIDGE_RETRY_DELAY_SECONDS", "1"))
-        if self._quote_context is None or self._screener_context is None:
-            quote_context, screener_context, sdk = self._create_context()
+        if self._quote_context is None or self._screener_context is None or self._calendar_context is None:
+            quote_context, screener_context, calendar_context, sdk = self._create_context()
             self._quote_context = self._quote_context or quote_context
             self._screener_context = self._screener_context or screener_context
+            self._calendar_context = self._calendar_context or calendar_context
             self._sdk = self._sdk or sdk
+        self._finance_calendar_cache = {} if has_injected_calendar_context else _FINANCE_CALENDAR_CACHE
 
     def get_daily_bars(self, symbol: str, count: int = 120) -> list[MarketDataBar]:
         if self._quote_context is None:
@@ -197,6 +204,49 @@ class LongbridgeService:
                     latest_quotes[latest_quote.symbol] = latest_quote
         return latest_quotes
 
+    def get_earnings_dates(
+        self,
+        symbols: list[str],
+        market: str,
+        reference_date: date | None = None,
+    ) -> dict[str, date]:
+        if self._calendar_context is None:
+            return self._mock_earnings_dates(symbols)
+
+        if not symbols:
+            return {}
+        reference = reference_date or datetime.now(timezone.utc).date()
+        start_date = reference
+        end_date = reference
+        wanted = set(symbols)
+
+        dates_by_symbol: dict[str, list[date]] = {symbol: [] for symbol in symbols}
+        for event in self._finance_calendar_events_for_window(market, start_date, end_date):
+            symbol = str(getattr(event, "symbol", ""))
+            event_date = _event_date_or_none(event)
+            if symbol in wanted and event_date is not None:
+                dates_by_symbol[symbol].append(event_date)
+
+        return {
+            symbol: _closest_date(reference, event_dates)
+            for symbol, event_dates in dates_by_symbol.items()
+            if event_dates
+        }
+
+    def _finance_calendar_events_for_window(self, market: str, start_date: date, end_date: date) -> list[Any]:
+        cache_key = (market, start_date, end_date)
+        if cache_key not in self._finance_calendar_cache:
+            response = self._call_with_retries(
+                lambda: self._calendar_context.finance_calendar(
+                    self._sdk.CalendarCategory.Report,
+                    start_date.isoformat(),
+                    end_date.isoformat(),
+                    market=market,
+                )
+            )
+            self._finance_calendar_cache[cache_key] = _calendar_events(response)
+        return self._finance_calendar_cache[cache_key]
+
     def screen_securities(
         self,
         market: str,
@@ -273,7 +323,7 @@ class LongbridgeService:
                 self._sleep(self._retry_delay_seconds * (attempt + 1))
         raise RuntimeError("unreachable retry state")
 
-    def _create_context(self) -> tuple[Any | None, Any | None, Any | None]:
+    def _create_context(self) -> tuple[Any | None, Any | None, Any | None, Any | None]:
         load_environment()
         if not all(
             os.getenv(name)
@@ -283,14 +333,14 @@ class LongbridgeService:
                 "LONGBRIDGE_ACCESS_TOKEN",
             )
         ):
-            return None, None, None
+            return None, None, None, None
         try:
             from longbridge import openapi as sdk
 
             config = sdk.Config.from_apikey_env()
-            return sdk.QuoteContext(config), sdk.ScreenerContext(config), sdk
+            return sdk.QuoteContext(config), sdk.ScreenerContext(config), sdk.CalendarContext(config), sdk
         except Exception:
-            return None, None, None
+            return None, None, None, None
 
     def _period(self, interval: str) -> Any:
         mapping = {
@@ -381,6 +431,12 @@ class LongbridgeService:
             )
         return latest_quotes
 
+    def _mock_earnings_dates(self, symbols: list[str]) -> dict[str, date]:
+        return {
+            symbol: date(2026, 7, 23) if symbol.endswith(".US") else date(2026, 8, 13)
+            for symbol in symbols
+        }
+
 
 def _first_text(item: Any, *names: str, default: str) -> str:
     for name in names:
@@ -392,6 +448,79 @@ def _first_text(item: Any, *names: str, default: str) -> str:
 
 def _chunks(values: list[str], size: int) -> list[list[str]]:
     return [values[index : index + size] for index in range(0, len(values), size)]
+
+
+def _calendar_events(response: Any) -> list[Any]:
+    data = getattr(response, "data", response)
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        items = data.get("events") or data.get("items") or data.get("infos")
+        if items is not None:
+            return list(items)
+        events: list[Any] = []
+        for group in data.get("list", []):
+            if isinstance(group, dict):
+                events.extend(group.get("infos", []) or group.get("events", []) or group.get("items", []))
+            else:
+                events.extend(getattr(group, "infos", []) or getattr(group, "events", []) or getattr(group, "items", []))
+        return events
+    events: list[Any] = []
+    for group in getattr(data, "list", []) or getattr(data, "date_groups", []) or getattr(data, "groups", []):
+        events.extend(getattr(group, "infos", []) or getattr(group, "events", []) or getattr(group, "items", []))
+    return events
+
+
+def _event_date_or_none(event: Any) -> date | None:
+    event_datetime = _event_datetime_date_or_none(getattr(event, "datetime", None))
+    if event_datetime is not None:
+        return event_datetime
+
+    event_date = getattr(event, "date", None)
+    if isinstance(event_date, datetime):
+        return event_date.date()
+    if isinstance(event_date, date):
+        return event_date
+    if isinstance(event_date, str):
+        iso_date = _date_from_text_or_none(event_date)
+        if iso_date is not None:
+            return iso_date
+    return None
+
+
+def _event_datetime_date_or_none(value: Any) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, int | float):
+        return datetime.fromtimestamp(value, tz=timezone.utc).date()
+    if isinstance(value, str):
+        normalized = value.strip()
+        if normalized.isdigit():
+            return datetime.fromtimestamp(int(normalized), tz=timezone.utc).date()
+        try:
+            parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed.date()
+    return None
+
+
+def _date_from_text_or_none(value: str) -> date | None:
+    try:
+        return date.fromisoformat(value[:10])
+    except ValueError:
+        pass
+    match = re.search(r"(\d{4})[.-](\d{1,2})[.-](\d{1,2})", value)
+    if match is None:
+        return None
+    year, month, day = (int(part) for part in match.groups())
+    return date(year, month, day)
+
+
+def _closest_date(reference: date, values: list[date]) -> date:
+    return min(values, key=lambda value: (abs((value - reference).days), value))
 
 
 def _decimal_or_none(value: Any) -> Decimal | None:

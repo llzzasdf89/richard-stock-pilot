@@ -18,6 +18,7 @@ export interface ScreeningRow {
   market: "US" | "HK";
   currency: string;
   signal_type: "upper_breakout" | "lower_breakdown" | "none";
+  earnings_date: string | null;
   trade_date?: string;
   interval?: string;
   close: number;
