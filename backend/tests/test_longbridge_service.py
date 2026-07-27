@@ -440,3 +440,30 @@ def test_longbridge_service_parses_counter_id_and_alternate_item_list_key():
     assert securities[0].symbol == "700.HK"
     assert securities[0].name == "腾讯控股"
     assert securities[0].market_cap == Decimal("3600000000000")
+
+
+def test_longbridge_service_normalizes_screener_internal_symbol():
+    class InternalSymbolScreenerContext(FakeScreenerContext):
+        def screener_search(self, market, strategy_id=None, conditions=None, show=None, page=0, size=20):
+            self.calls.append(("screener_search", market, strategy_id, conditions, show, page, size))
+            return SimpleNamespace(
+                data={
+                    "items": [
+                        {
+                            "symbol": "ETF/US/BNY",
+                            "name": "Bank of NY Mellon",
+                        }
+                    ]
+                }
+            )
+
+    service = LongbridgeService(screener_context=InternalSymbolScreenerContext(), sdk=FakeSdk)
+
+    securities = service.screen_securities(
+        market="US",
+        min_market_cap=Decimal("50000000000"),
+        min_avg_volume=Decimal("1000000"),
+        page_size=50,
+    )
+
+    assert securities[0].symbol == "BNY.US"

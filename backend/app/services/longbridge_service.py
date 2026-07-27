@@ -644,17 +644,21 @@ def _security_from_screener_item(item: Any) -> Security:
 def _screener_symbol(item: dict[str, Any]) -> str:
     symbol = item.get("symbol") or item.get("security_code") or item.get("code")
     if symbol:
-        return str(symbol)
+        return _normalize_screener_symbol(str(symbol))
 
     counter_id = item.get("counter_id")
     if isinstance(counter_id, str):
-        parts = counter_id.split("/")
-        if len(parts) == 3 and parts[0] == "ST":
-            market = parts[1]
-            code = parts[2].lstrip("0") or parts[2]
-            if market in {"US", "HK"}:
-                return f"{code}.{market}"
+        return _normalize_screener_symbol(counter_id)
     return str(counter_id)
+
+
+def _normalize_screener_symbol(symbol: str) -> str:
+    parts = symbol.split("/")
+    if len(parts) == 3 and parts[1] in {"US", "HK"}:
+        market = parts[1]
+        code = parts[2].lstrip("0") or parts[2]
+        return f"{code}.{market}"
+    return symbol
 
 
 def _screener_value(item: dict[str, Any], key: str) -> Any:
