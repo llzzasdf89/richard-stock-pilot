@@ -29,6 +29,29 @@ def _ensure_schema(active_engine: Engine) -> None:
         with active_engine.begin() as connection:
             connection.execute(text("ALTER TABLE stocks ADD COLUMN earnings_date DATE"))
 
+    if "stock_metrics_daily" not in inspector.get_table_names():
+        return
+    metric_columns = {
+        column["name"] for column in inspect(active_engine).get_columns("stock_metrics_daily")
+    }
+    additions = {
+        "ma20_direction": "VARCHAR",
+        "atr14": "NUMERIC",
+        "previous_10d_low": "NUMERIC",
+        "previous_10d_high": "NUMERIC",
+        "has_reversal_trend": "VARCHAR",
+        "is_suitable_for_entry": "VARCHAR",
+    }
+    with active_engine.begin() as connection:
+        for column_name, column_type in additions.items():
+            if column_name not in metric_columns:
+                connection.execute(
+                    text(
+                        f"ALTER TABLE stock_metrics_daily "
+                        f"ADD COLUMN {column_name} {column_type}"
+                    )
+                )
+
 
 def get_db() -> Generator[Session]:
     session = SessionLocal()

@@ -31,6 +31,12 @@ class StockMetricDaily(Base):
     prev_boll_lower: Mapped[Decimal | None] = mapped_column(Numeric)
     signal_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
     break_percent: Mapped[Decimal | None] = mapped_column(Numeric)
+    ma20_direction: Mapped[str | None] = mapped_column(String)
+    atr14: Mapped[Decimal | None] = mapped_column(Numeric)
+    previous_10d_low: Mapped[Decimal | None] = mapped_column(Numeric)
+    previous_10d_high: Mapped[Decimal | None] = mapped_column(Numeric)
+    has_reversal_trend: Mapped[str | None] = mapped_column(String)
+    is_suitable_for_entry: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
