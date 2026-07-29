@@ -78,6 +78,12 @@ def seed_metric(session: Session) -> None:
             prev_boll_lower=Decimal("193.00"),
             signal_type="upper_breakout",
             break_percent=Decimal("0.012019"),
+            ma20_direction="上升",
+            atr14=Decimal("2.50"),
+            previous_10d_low=Decimal("190.00"),
+            previous_10d_high=Decimal("215.00"),
+            has_reversal_trend="否",
+            is_suitable_for_entry="是",
             created_at=now,
             updated_at=now,
         )
@@ -149,6 +155,12 @@ def test_daily_screenings_return_unified_response_and_log_request(monkeypatch):
     assert row["boll_upper"] == 208
     assert row["boll_mid"] == 200
     assert row["boll_lower"] == 192
+    assert row["ma20_direction"] == "上升"
+    assert row["atr14"] == 2.5
+    assert row["previous_10d_low"] == 190
+    assert row["previous_10d_high"] == 215
+    assert row["has_reversal_trend"] == "否"
+    assert row["is_suitable_for_entry"] == "是"
 
     with session_factory() as session:
         log = session.scalar(select(RequestLog).where(RequestLog.request_id == "req-daily-1"))

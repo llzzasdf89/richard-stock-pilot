@@ -12,8 +12,10 @@ from app.models.screening_run import ScreeningRun
 from app.models.stock import Stock
 from app.models.stock_metric import StockMetricDaily
 from app.services.indicator_service import (
+    DailyPriceBar,
     calculate_bollinger,
     calculate_break_percent,
+    calculate_historical_setup,
     detect_boll_signal,
 )
 from app.services.longbridge_service import LongbridgeService, MarketDataBar
@@ -203,9 +205,32 @@ def _build_metric(
     if market_cap is None:
         return None
     closes = [bar.close for bar in bars]
-    bands = calculate_bollinger(closes, period=boll_period, std_multiplier=float(boll_std_multiplier))
-    prev_band = bands[-2]
-    current_band = bands[-1]
+    historical_bars = [
+        DailyPriceBar(
+            trade_date=bar.time.date(),
+            high=bar.high,
+            low=bar.low,
+            close=bar.close,
+        )
+        for bar in bars[:-1]
+    ]
+    setup = calculate_historical_setup(
+        historical_bars,
+        current_price=closes[-1],
+        boll_period=boll_period,
+        boll_std_multiplier=float(boll_std_multiplier),
+    )
+    historical_bands = calculate_bollinger(
+        closes[:-1],
+        period=boll_period,
+        std_multiplier=float(boll_std_multiplier),
+    )
+    prev_band = historical_bands[-2]
+    current_band = {
+        "mid": setup.boll_mid,
+        "upper": setup.boll_upper,
+        "lower": setup.boll_lower,
+    }
     if None in (
         prev_band["upper"],
         prev_band["lower"],
@@ -246,6 +271,12 @@ def _build_metric(
                 lower=float(current_band["lower"]),
             )
         ),
+        ma20_direction=setup.ma20_direction,
+        atr14=_decimal_or_none(setup.atr14),
+        previous_10d_low=_decimal_or_none(setup.previous_10d_low),
+        previous_10d_high=_decimal_or_none(setup.previous_10d_high),
+        has_reversal_trend=setup.has_reversal_trend,
+        is_suitable_for_entry=setup.is_suitable_for_entry,
         created_at=now,
         updated_at=now,
     )
@@ -275,6 +306,12 @@ def _upsert_metric(session: Session, metric: StockMetricDaily) -> None:
         "prev_boll_lower",
         "signal_type",
         "break_percent",
+        "ma20_direction",
+        "atr14",
+        "previous_10d_low",
+        "previous_10d_high",
+        "has_reversal_trend",
+        "is_suitable_for_entry",
         "updated_at",
     ):
         setattr(existing, field, getattr(metric, field))

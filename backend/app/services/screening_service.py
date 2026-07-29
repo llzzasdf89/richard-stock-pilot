@@ -39,6 +39,12 @@ def _metric_row(stock: Stock, metric: StockMetricDaily) -> dict[str, Any]:
         "boll_mid": _to_float(metric.boll_mid),
         "boll_lower": _to_float(metric.boll_lower),
         "break_percent": _to_float(metric.break_percent),
+        "ma20_direction": metric.ma20_direction,
+        "atr14": _to_float(metric.atr14),
+        "previous_10d_low": _to_float(metric.previous_10d_low),
+        "previous_10d_high": _to_float(metric.previous_10d_high),
+        "has_reversal_trend": metric.has_reversal_trend,
+        "is_suitable_for_entry": metric.is_suitable_for_entry,
         "data_time": metric.trade_date.isoformat(),
     }
 
