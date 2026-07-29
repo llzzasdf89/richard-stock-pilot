@@ -1,6 +1,11 @@
+from datetime import date, timedelta
+
 from app.services.indicator_service import (
+    DailyPriceBar,
     calculate_bollinger,
     calculate_break_percent,
+    calculate_historical_setup,
+    calculate_true_range,
     detect_boll_signal,
 )
 
@@ -63,3 +68,120 @@ def test_calculate_break_percent_uses_matching_band():
     assert calculate_break_percent("upper_breakout", close=105, upper=100, lower=90) == 0.05
     assert calculate_break_percent("lower_breakdown", close=90, upper=110, lower=100) == 0.1
     assert calculate_break_percent("none", close=100, upper=110, lower=90) is None
+
+
+def _daily_bars(closes: list[float], spread: float = 1) -> list[DailyPriceBar]:
+    start = date(2026, 1, 1)
+    return [
+        DailyPriceBar(
+            trade_date=start + timedelta(days=index),
+            high=close + spread,
+            low=close - spread,
+            close=close,
+        )
+        for index, close in enumerate(closes)
+    ]
+
+
+def test_calculate_historical_setup_uses_trading_day_windows():
+    bars = _daily_bars([float(value) for value in range(100, 125)])
+
+    result = calculate_historical_setup(bars, current_price=126)
+
+    assert result.ma20_direction == "上升"
+    assert result.previous_10d_low == 114
+    assert result.previous_10d_high == 125
+    assert result.boll_mid == 114.5
+
+
+def test_calculate_historical_setup_deduplicates_and_sorts_dates():
+    bars = _daily_bars([float(value) for value in range(100, 125)])
+    duplicate = DailyPriceBar(
+        trade_date=bars[-1].trade_date,
+        high=999,
+        low=999,
+        close=999,
+    )
+
+    result = calculate_historical_setup([duplicate, *reversed(bars)], current_price=126)
+
+    assert result.previous_10d_low == 114
+    assert result.previous_10d_high == 125
+
+
+def test_calculate_historical_setup_identifies_down_and_flat_ma20():
+    down = calculate_historical_setup(_daily_bars([float(value) for value in range(125, 100, -1)]), 99)
+    flat = calculate_historical_setup(_daily_bars([100.0] * 25), 100)
+
+    assert down.ma20_direction == "下降"
+    assert flat.ma20_direction == "需人工判断"
+    assert flat.has_reversal_trend == "否"
+    assert flat.is_suitable_for_entry == "否"
+
+
+def test_calculate_true_range_uses_standard_maximum():
+    assert calculate_true_range(high=12, low=9, previous_close=10) == 3
+    assert calculate_true_range(high=15, low=14, previous_close=10) == 5
+    assert calculate_true_range(high=9, low=7, previous_close=12) == 5
+
+
+def test_calculate_historical_setup_averages_fourteen_true_ranges():
+    bars = _daily_bars([100.0] * 25, spread=2)
+
+    result = calculate_historical_setup(bars, current_price=100)
+
+    assert result.atr14 == 4
+
+
+def test_calculate_historical_setup_detects_long_reversal_and_entry():
+    bars = _daily_bars([float(value) for value in range(100, 125)])
+    bars[-10:] = [
+        DailyPriceBar(bar.trade_date, high=bar.high, low=80, close=bar.close)
+        for bar in bars[-10:]
+    ]
+    baseline = calculate_historical_setup(bars, current_price=0)
+    assert baseline.boll_lower is not None
+    assert baseline.previous_10d_low is not None
+    assert baseline.atr14 is not None
+
+    reversal_price = min(
+        baseline.boll_lower,
+        baseline.previous_10d_low - 0.25 * baseline.atr14 - 0.01,
+    )
+    reversal = calculate_historical_setup(bars, current_price=reversal_price)
+    entry = calculate_historical_setup(bars, current_price=baseline.boll_lower)
+
+    assert reversal.has_reversal_trend == "是"
+    assert reversal.is_suitable_for_entry == "否"
+    assert entry.has_reversal_trend == "否"
+    assert entry.is_suitable_for_entry == "是"
+
+
+def test_calculate_historical_setup_detects_short_reversal_and_entry():
+    bars = _daily_bars([float(value) for value in range(125, 100, -1)])
+    bars[-10:] = [
+        DailyPriceBar(bar.trade_date, high=145, low=bar.low, close=bar.close)
+        for bar in bars[-10:]
+    ]
+    baseline = calculate_historical_setup(bars, current_price=999)
+    assert baseline.boll_upper is not None
+    assert baseline.previous_10d_high is not None
+    assert baseline.atr14 is not None
+
+    reversal_price = max(
+        baseline.boll_upper,
+        baseline.previous_10d_high + 0.25 * baseline.atr14 + 0.01,
+    )
+    reversal = calculate_historical_setup(bars, current_price=reversal_price)
+    entry = calculate_historical_setup(bars, current_price=baseline.boll_upper)
+
+    assert reversal.has_reversal_trend == "是"
+    assert reversal.is_suitable_for_entry == "否"
+    assert entry.has_reversal_trend == "否"
+    assert entry.is_suitable_for_entry == "是"
+
+
+def test_calculate_historical_setup_returns_all_none_with_insufficient_history():
+    result = calculate_historical_setup(_daily_bars([100.0] * 24), current_price=100)
+
+    assert all(value is None for value in vars(result).values())
