@@ -226,11 +226,7 @@ def _build_metric(
         std_multiplier=float(boll_std_multiplier),
     )
     prev_band = historical_bands[-2]
-    current_band = {
-        "mid": setup.boll_mid,
-        "upper": setup.boll_upper,
-        "lower": setup.boll_lower,
-    }
+    current_band = historical_bands[-1]
     if None in (
         prev_band["upper"],
         prev_band["lower"],
