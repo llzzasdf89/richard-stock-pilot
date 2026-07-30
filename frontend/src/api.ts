@@ -29,6 +29,12 @@ export interface ScreeningRow {
   boll_mid: number;
   boll_lower: number;
   break_percent: number | null;
+  ma20_direction: "上升" | "下降" | "需人工判断" | null;
+  atr14: number | null;
+  previous_10d_low: number | null;
+  previous_10d_high: number | null;
+  has_reversal_trend: "是" | "否" | null;
+  is_suitable_for_entry: "是" | "否" | null;
   data_time: string;
 }
 

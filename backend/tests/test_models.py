@@ -66,6 +66,12 @@ def test_models_persist_stock_metric_and_request_log():
             prev_boll_lower=Decimal("345.0"),
             signal_type="upper_breakout",
             break_percent=Decimal("0.00466"),
+            ma20_direction="上升",
+            atr14=Decimal("8.25"),
+            previous_10d_low=Decimal("340.0"),
+            previous_10d_high=Decimal("390.0"),
+            has_reversal_trend="否",
+            is_suitable_for_entry="是",
             created_at=now,
             updated_at=now,
         )
@@ -106,5 +112,11 @@ def test_models_persist_stock_metric_and_request_log():
     log = session.scalar(select(RequestLog).where(RequestLog.request_id == "req-1"))
 
     assert metric.signal_type == "upper_breakout"
+    assert metric.ma20_direction == "上升"
+    assert metric.atr14 == Decimal("8.25")
+    assert metric.previous_10d_low == Decimal("340.0")
+    assert metric.previous_10d_high == Decimal("390.0")
+    assert metric.has_reversal_trend == "否"
+    assert metric.is_suitable_for_entry == "是"
     assert metric.stock.symbol == "00700.HK"
     assert log.path == "/api/daily-screenings"

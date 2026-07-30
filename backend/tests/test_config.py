@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import os
 
+from sqlalchemy import create_engine, inspect, text
+
 from app.config import load_environment
+from app.config import message_push_enabled
 from app.config import resolve_database_url
+from app.db import init_db
 
 
 def test_load_environment_reads_root_env_file(monkeypatch, tmp_path) -> None:
@@ -51,3 +55,41 @@ def test_resolve_database_url_anchors_relative_sqlite_paths_to_backend_root(tmp_
     url = resolve_database_url("sqlite:///./richard_stock_pilot.db", backend_root=backend_root)
 
     assert url == f"sqlite:///{backend_root / 'richard_stock_pilot.db'}"
+
+
+def test_message_push_enabled_defaults_to_false_and_accepts_common_true_values(monkeypatch) -> None:
+    monkeypatch.delenv("ENABLE_MESSAGE_PUSH", raising=False)
+    assert message_push_enabled() is False
+
+    for value in ("1", "true", "TRUE", "yes", "on"):
+        monkeypatch.setenv("ENABLE_MESSAGE_PUSH", value)
+        assert message_push_enabled() is True
+
+
+def test_init_db_adds_technical_indicator_columns_to_existing_metric_table() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE stocks (id INTEGER PRIMARY KEY)"))
+        connection.execute(
+            text(
+                """
+                CREATE TABLE stock_metrics_daily (
+                    id INTEGER PRIMARY KEY,
+                    stock_id INTEGER NOT NULL,
+                    trade_date DATE NOT NULL
+                )
+                """
+            )
+        )
+
+    init_db(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("stock_metrics_daily")}
+    assert {
+        "ma20_direction",
+        "atr14",
+        "previous_10d_low",
+        "previous_10d_high",
+        "has_reversal_trend",
+        "is_suitable_for_entry",
+    } <= columns

@@ -110,6 +110,28 @@ class LongbridgeService:
         )
         return [self._market_bar_from_candle(candle) for candle in candles]
 
+    def get_trading_days(self, market: str, start: date, end: date) -> set[date]:
+        if self._quote_context is None:
+            return {
+                start + timedelta(days=offset)
+                for offset in range((end - start).days + 1)
+                if (start + timedelta(days=offset)).weekday() < 5
+            }
+        response = self._quote_context.trading_days(self._market(market), start, end)
+        days: set[date] = set()
+        for name in ("trade_days", "trading_days", "normal_days", "half_trade_days", "half_days"):
+            for value in getattr(response, name, None) or []:
+                parsed = _date_value_or_none(value)
+                if parsed is not None:
+                    days.add(parsed)
+        if isinstance(response, tuple | list):
+            for group in response:
+                for value in group or []:
+                    parsed = _date_value_or_none(value)
+                    if parsed is not None:
+                        days.add(parsed)
+        return days
+
     def get_intraday_bars(self, symbol: str, interval: str = "5m", limit: int = 30) -> list[IntradayBar]:
         if self._quote_context is not None:
             period = self._period(interval)
@@ -518,6 +540,16 @@ def _date_from_text_or_none(value: str) -> date | None:
         return None
     year, month, day = (int(part) for part in match.groups())
     return date(year, month, day)
+
+
+def _date_value_or_none(value: Any) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        return _date_from_text_or_none(value)
+    return None
 
 
 def _closest_date(reference: date, values: list[date]) -> date:

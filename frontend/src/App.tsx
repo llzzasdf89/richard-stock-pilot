@@ -317,7 +317,7 @@ function ScreeningTable({
 }) {
   const closeLabel = activeTab === "daily" ? "收盘价" : "昨日收盘价";
   const showLatestPrice = activeTab === "intraday";
-  const emptyColSpan = showLatestPrice ? 15 : 14;
+  const emptyColSpan = showLatestPrice ? 21 : 20;
 
   return (
     <div className="table-wrap">
@@ -337,6 +337,12 @@ function ScreeningTable({
             <th className="numeric">BOLL 上轨价格</th>
             <th className="numeric">BOLL 中轨价格</th>
             <th className="numeric">BOLL 下轨价格</th>
+            <th>MA20均线方向</th>
+            <th className="numeric">平均波动幅度 ATR14</th>
+            <th className="numeric">前10个交易日最低点</th>
+            <th className="numeric">前10个交易日最高点</th>
+            <th>是否存在逆转趋势</th>
+            <th>是否适合建仓</th>
             <th className="numeric">突破幅度</th>
             <th>数据时间</th>
           </tr>
@@ -359,6 +365,12 @@ function ScreeningTable({
               <td className="numeric">{formatPrice(row.boll_upper)}</td>
               <td className="numeric">{formatPrice(row.boll_mid)}</td>
               <td className="numeric">{formatPrice(row.boll_lower)}</td>
+              <td>{row.ma20_direction ?? "-"}</td>
+              <td className="numeric">{formatAtr14(row.atr14)}</td>
+              <td className="numeric">{formatPrice(row.previous_10d_low)}</td>
+              <td className="numeric">{formatPrice(row.previous_10d_high)}</td>
+              <td>{row.has_reversal_trend ?? "-"}</td>
+              <td>{row.is_suitable_for_entry ?? "-"}</td>
               <td className="numeric">{formatPercent(row.break_percent)}</td>
               <td>{row.data_time}</td>
             </tr>
@@ -389,8 +401,14 @@ function formatSignal(signal: ScreeningRow["signal_type"]) {
   return "无信号";
 }
 
-function formatPrice(value: number) {
+function formatPrice(value: number | null) {
+  if (value === null) return "-";
   return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 3 }).format(value);
+}
+
+function formatAtr14(value: number | null) {
+  if (value === null) return "-";
+  return value.toFixed(2);
 }
 
 function formatLargeMoney(value: number) {

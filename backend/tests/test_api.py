@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
@@ -78,6 +78,12 @@ def seed_metric(session: Session) -> None:
             prev_boll_lower=Decimal("193.00"),
             signal_type="upper_breakout",
             break_percent=Decimal("0.012019"),
+            ma20_direction="上升",
+            atr14=Decimal("2.50"),
+            previous_10d_low=Decimal("190.00"),
+            previous_10d_high=Decimal("215.00"),
+            has_reversal_trend="否",
+            is_suitable_for_entry="是",
             created_at=now,
             updated_at=now,
         )
@@ -149,6 +155,12 @@ def test_daily_screenings_return_unified_response_and_log_request(monkeypatch):
     assert row["boll_upper"] == 208
     assert row["boll_mid"] == 200
     assert row["boll_lower"] == 192
+    assert row["ma20_direction"] == "上升"
+    assert row["atr14"] == 2.5
+    assert row["previous_10d_low"] == 190
+    assert row["previous_10d_high"] == 215
+    assert row["has_reversal_trend"] == "否"
+    assert row["is_suitable_for_entry"] == "是"
 
     with session_factory() as session:
         log = session.scalar(select(RequestLog).where(RequestLog.request_id == "req-daily-1"))
@@ -285,6 +297,7 @@ def test_intraday_screenings_passes_slider_filters_to_longbridge_screener(monkey
 
 def test_intraday_screenings_returns_previous_close_and_latest_session_price(monkeypatch):
     earnings_calls: list[tuple[list[str], str]] = []
+    daily_bar_calls: list[str] = []
 
     class FakeLongbridge:
         def screen_securities(self, market, min_market_cap, min_avg_volume):
@@ -297,10 +310,11 @@ def test_intraday_screenings_returns_previous_close_and_latest_session_price(mon
         def get_daily_bars(self, symbol, count=30):
             from app.services.longbridge_service import MarketDataBar
 
-            now = datetime.now(timezone.utc)
-            return [
+            daily_bar_calls.append(symbol)
+            start = datetime(2026, 6, 26, 20, tzinfo=timezone.utc)
+            completed = [
                 MarketDataBar(
-                    time=now,
+                    time=start + timedelta(days=index),
                     open=100,
                     high=101,
                     low=99,
@@ -308,7 +322,19 @@ def test_intraday_screenings_returns_previous_close_and_latest_session_price(mon
                     volume=20_000_000,
                     turnover=Decimal("100000000"),
                 )
-                for _ in range(25)
+                for index in range(26)
+            ]
+            return [
+                *completed,
+                MarketDataBar(
+                    time=datetime(2026, 7, 22, 20, tzinfo=timezone.utc),
+                    open=1000,
+                    high=1100,
+                    low=1,
+                    close=1000,
+                    volume=20_000_000,
+                    turnover=Decimal("100000000"),
+                ),
             ]
 
         def get_intraday_bars(self, symbol, interval="5m", limit=30):
@@ -318,7 +344,7 @@ def test_intraday_screenings_returns_previous_close_and_latest_session_price(mon
             return [IntradayBar(time=now, close=200) for _ in range(limit)]
 
         def get_latest_quotes(self, symbols):
-            now = datetime(2026, 7, 22, 2, 30, tzinfo=timezone.utc)
+            now = datetime(2026, 7, 22, 14, 30, tzinfo=timezone.utc)
             return {
                 symbol: LatestQuote(symbol=symbol, price=110, previous_close=99, time=now, session="overnight")
                 for symbol in symbols
@@ -347,6 +373,19 @@ def test_intraday_screenings_returns_previous_close_and_latest_session_price(mon
 
     body = response.json()
     row = body["data"]["results"][0]
+    second_response = client.get(
+        "/api/intraday-screenings",
+        params={
+            "market": "US",
+            "signal_type": "upper_breakout",
+            "min_market_cap": "200000000000",
+            "min_avg_volume": "10000000",
+            "interval": "5m",
+            "page": 1,
+            "page_size": 10,
+        },
+        headers={"X-Request-ID": "req-intraday-latest-quote-2"},
+    )
     assert response.status_code == 200
     assert body["success"] is True
     assert body["data"]["total"] == 1
@@ -356,9 +395,17 @@ def test_intraday_screenings_returns_previous_close_and_latest_session_price(mon
     assert row["boll_mid"] == 100
     assert row["boll_lower"] == 100
     assert row["signal_type"] == "upper_breakout"
+    assert row["ma20_direction"] == "需人工判断"
+    assert row["atr14"] == 2
+    assert row["previous_10d_low"] == 99
+    assert row["previous_10d_high"] == 101
+    assert row["has_reversal_trend"] == "否"
+    assert row["is_suitable_for_entry"] == "否"
     assert row["earnings_date"] == "2026-07-23"
-    assert row["data_time"] == "2026-07-22T02:30:00+00:00"
-    assert earnings_calls == [(["AAPL.US"], "US")]
+    assert row["data_time"] == "2026-07-22T14:30:00+00:00"
+    assert earnings_calls == [(["AAPL.US"], "US"), (["AAPL.US"], "US")]
+    assert second_response.status_code == 200
+    assert daily_bar_calls == ["AAPL.US", "AAPL.US"]
 
 
 def test_internal_errors_still_return_http_200_with_code_500(monkeypatch):
