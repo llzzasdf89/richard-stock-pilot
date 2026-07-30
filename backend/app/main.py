@@ -9,14 +9,19 @@ from starlette.requests import Request
 from app.db import SessionLocal, init_db
 from app.middleware import RequestLoggingMiddleware
 from app.response import api_error, json_200
+from app.services.message_push_scheduler import start_message_push, stop_message_push
 from app.views.daily_screening_view import router as daily_router
 from app.views.intraday_screening_view import router as intraday_router
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(app: FastAPI):
     init_db()
-    yield
+    await start_message_push(app)
+    try:
+        yield
+    finally:
+        await stop_message_push(app)
 
 
 app = FastAPI(title="Richard Stock Pilot API", lifespan=lifespan)

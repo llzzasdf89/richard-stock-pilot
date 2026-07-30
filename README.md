@@ -59,6 +59,20 @@ VITE_API_BASE=
 
 Existing shell environment values take priority, so production deployments can still inject secrets without changing files. When credentials are available, `LongbridgeService` uses the official `longbridge` Python SDK. Without credentials, it falls back to deterministic mock data so local development still runs.
 
+### PushPlus 建仓机会提醒
+
+在 `.env` 中启用：
+
+```dotenv
+ENABLE_MESSAGE_PUSH=true
+MESSAGE_PUSH_PROVIDER=pushplus
+PUSHPLUS_TOKEN=your PushPlus token
+```
+
+开启后，FastAPI 启动时分别预热美股和港股的历史日 K 缓存，并在每个中国时间整点重新筛选。只有符合现有建仓条件的股票才会通过 PushPlus 逐只发送；没有匹配股票时不会发送消息。
+
+本功能不需要公网 IP 或域名，本地电脑也可以运行。电脑必须保持开机、联网且不进入休眠。后台定时任务第一版只支持单 Worker；不要同时启动多个 FastAPI Worker，否则会重复扫描和推送。
+
 ## Start
 
 Run both frontend and backend from the project root:
@@ -81,7 +95,7 @@ BACKEND_PORT=8001 FRONTEND_PORT=5174 ./start.sh
 
 ```bash
 cd backend
-uv run uvicorn app.main:app --reload
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
 Run tests:

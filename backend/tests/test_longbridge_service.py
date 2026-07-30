@@ -75,6 +75,13 @@ class FakeQuoteContext:
             for symbol in symbols
         ]
 
+    def trading_days(self, market, begin, end):
+        self.calls.append(("trading_days", market, begin, end))
+        return SimpleNamespace(
+            trade_days=[date(2026, 7, 30)],
+            half_trade_days=[date(2026, 7, 31)],
+        )
+
 
 class FakeScreenerContext:
     def __init__(self, marketcap_unit="亿", volume_key="volume", volume_name="成交量", volume_unit="股", response_key="items"):
@@ -210,6 +217,21 @@ def test_longbridge_service_maps_intraday_interval_to_sdk_period():
 
     assert bars[0].close == 108
     assert context.calls[0] == ("candlesticks", "700.HK", "5m", 1, "no_adjust")
+
+
+def test_longbridge_service_gets_normal_and_half_trading_days():
+    context = FakeQuoteContext()
+    service = LongbridgeService(quote_context=context, sdk=FakeSdk)
+
+    days = service.get_trading_days("US", date(2026, 7, 30), date(2026, 7, 31))
+
+    assert days == {date(2026, 7, 30), date(2026, 7, 31)}
+    assert context.calls[-1] == (
+        "trading_days",
+        "US",
+        date(2026, 7, 30),
+        date(2026, 7, 31),
+    )
 
 
 def test_longbridge_service_maps_security_list_and_static_info():

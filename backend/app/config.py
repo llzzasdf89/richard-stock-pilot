@@ -30,3 +30,12 @@ def resolve_database_url(database_url: str, backend_root: Path = BACKEND_ROOT) -
 load_environment()
 
 DATABASE_URL = resolve_database_url(os.getenv("DATABASE_URL", "sqlite:///./richard_stock_pilot.db"))
+
+
+def message_push_enabled() -> bool:
+    return os.getenv("ENABLE_MESSAGE_PUSH", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }

@@ -5,6 +5,7 @@ import os
 from sqlalchemy import create_engine, inspect, text
 
 from app.config import load_environment
+from app.config import message_push_enabled
 from app.config import resolve_database_url
 from app.db import init_db
 
@@ -54,6 +55,15 @@ def test_resolve_database_url_anchors_relative_sqlite_paths_to_backend_root(tmp_
     url = resolve_database_url("sqlite:///./richard_stock_pilot.db", backend_root=backend_root)
 
     assert url == f"sqlite:///{backend_root / 'richard_stock_pilot.db'}"
+
+
+def test_message_push_enabled_defaults_to_false_and_accepts_common_true_values(monkeypatch) -> None:
+    monkeypatch.delenv("ENABLE_MESSAGE_PUSH", raising=False)
+    assert message_push_enabled() is False
+
+    for value in ("1", "true", "TRUE", "yes", "on"):
+        monkeypatch.setenv("ENABLE_MESSAGE_PUSH", value)
+        assert message_push_enabled() is True
 
 
 def test_init_db_adds_technical_indicator_columns_to_existing_metric_table() -> None:
