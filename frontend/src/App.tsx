@@ -6,13 +6,11 @@ import {
   type ScreeningFilters,
   type ScreeningPayload,
   type ScreeningRow,
-  type SignalType,
   type TabKey
 } from "./api";
 
 const DEFAULT_FILTERS: ScreeningFilters = {
   market: "US",
-  signal_type: "all",
   min_market_cap: 200_000_000_000,
   min_avg_volume: 10_000_000,
   interval: "5m",
@@ -23,12 +21,6 @@ const DEFAULT_FILTERS: ScreeningFilters = {
 const marketOptions: Array<{ value: Market; label: string }> = [
   { value: "US", label: "美股" },
   { value: "HK", label: "港股" }
-];
-
-const signalOptions: Array<{ value: SignalType; label: string }> = [
-  { value: "all", label: "全部" },
-  { value: "upper_breakout", label: "上穿 BOLL" },
-  { value: "lower_breakdown", label: "下击 BOLL" }
 ];
 
 function App() {
@@ -160,12 +152,6 @@ function App() {
             options={marketOptions}
             value={filters.market}
             onChange={(market) => updateFilters({ market })}
-          />
-          <SegmentedControl
-            label="信号"
-            options={signalOptions}
-            value={filters.signal_type}
-            onChange={(signal_type) => updateFilters({ signal_type })}
           />
           <RangeFilter
             label="最低市值"
@@ -317,7 +303,7 @@ function ScreeningTable({
 }) {
   const closeLabel = activeTab === "daily" ? "收盘价" : "昨日收盘价";
   const showLatestPrice = activeTab === "intraday";
-  const emptyColSpan = showLatestPrice ? 21 : 20;
+  const emptyColSpan = showLatestPrice ? 20 : 19;
 
   return (
     <div className="table-wrap">
@@ -328,7 +314,6 @@ function ScreeningTable({
             <th>名称</th>
             <th>市场</th>
             <th>货币</th>
-            <th>信号</th>
             <th>近期财报日期（未来几天内）</th>
             <th className="numeric">{closeLabel}</th>
             {showLatestPrice && <th className="numeric">最新价格</th>}
@@ -338,25 +323,22 @@ function ScreeningTable({
             <th className="numeric">BOLL 中轨价格</th>
             <th className="numeric">BOLL 下轨价格</th>
             <th>MA20均线方向</th>
+            <th className="numeric">Z-Score</th>
             <th className="numeric">平均波动幅度 ATR14</th>
             <th className="numeric">前10个交易日最低点</th>
             <th className="numeric">前10个交易日最高点</th>
             <th>是否存在逆转趋势</th>
             <th>是否适合建仓</th>
-            <th className="numeric">突破幅度</th>
             <th>数据时间</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={`${row.symbol}-${row.data_time}-${row.signal_type}`}>
+            <tr key={`${row.symbol}-${row.data_time}`}>
               <td className="symbol">{row.symbol}</td>
               <td>{row.name}</td>
               <td>{row.market === "US" ? "美股" : "港股"}</td>
               <td>{row.currency}</td>
-              <td>
-                <span className={`signal ${row.signal_type}`}>{formatSignal(row.signal_type)}</span>
-              </td>
               <td>{row.earnings_date ?? "-"}</td>
               <td className="numeric">{formatPrice(row.close)}</td>
               {showLatestPrice && <td className="numeric">{formatPrice(row.latest_price)}</td>}
@@ -366,12 +348,12 @@ function ScreeningTable({
               <td className="numeric">{formatPrice(row.boll_mid)}</td>
               <td className="numeric">{formatPrice(row.boll_lower)}</td>
               <td>{row.ma20_direction ?? "-"}</td>
+              <td className="numeric">{formatZScore(row.z_score)}</td>
               <td className="numeric">{formatAtr14(row.atr14)}</td>
               <td className="numeric">{formatPrice(row.previous_10d_low)}</td>
               <td className="numeric">{formatPrice(row.previous_10d_high)}</td>
               <td>{row.has_reversal_trend ?? "-"}</td>
               <td>{row.is_suitable_for_entry ?? "-"}</td>
-              <td className="numeric">{formatPercent(row.break_percent)}</td>
               <td>{row.data_time}</td>
             </tr>
           ))}
@@ -395,18 +377,17 @@ function ScreeningTable({
   );
 }
 
-function formatSignal(signal: ScreeningRow["signal_type"]) {
-  if (signal === "upper_breakout") return "上穿 BOLL";
-  if (signal === "lower_breakdown") return "下击 BOLL";
-  return "无信号";
-}
-
 function formatPrice(value: number | null) {
   if (value === null) return "-";
   return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 3 }).format(value);
 }
 
 function formatAtr14(value: number | null) {
+  if (value === null) return "-";
+  return value.toFixed(2);
+}
+
+function formatZScore(value: number | null) {
   if (value === null) return "-";
   return value.toFixed(2);
 }
@@ -421,11 +402,6 @@ function formatVolume(value: number) {
   if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(1)}亿`;
   if (value >= 10_000) return `${(value / 10_000).toFixed(0)}万`;
   return new Intl.NumberFormat("zh-CN").format(value);
-}
-
-function formatPercent(value: number | null) {
-  if (value === null) return "-";
-  return `${(value * 100).toFixed(2)}%`;
 }
 
 function formatDateTime(value: string) {

@@ -1,10 +1,8 @@
 export type Market = "US" | "HK";
-export type SignalType = "all" | "upper_breakout" | "lower_breakdown";
 export type TabKey = "daily" | "intraday";
 
 export interface ScreeningFilters {
   market: Market;
-  signal_type: SignalType;
   min_market_cap: number;
   min_avg_volume: number;
   interval: string;
@@ -17,7 +15,6 @@ export interface ScreeningRow {
   name: string;
   market: "US" | "HK";
   currency: string;
-  signal_type: "upper_breakout" | "lower_breakdown" | "none";
   earnings_date: string | null;
   trade_date?: string;
   interval?: string;
@@ -28,8 +25,8 @@ export interface ScreeningRow {
   boll_upper: number;
   boll_mid: number;
   boll_lower: number;
-  break_percent: number | null;
   ma20_direction: "上升" | "下降" | "需人工判断" | null;
+  z_score: number | null;
   atr14: number | null;
   previous_10d_low: number | null;
   previous_10d_high: number | null;
@@ -68,7 +65,6 @@ export async function fetchIntradayScreenings(filters: ScreeningFilters): Promis
 async function fetchScreenings(path: string, filters: ScreeningFilters): Promise<ScreeningPayload> {
   const params = new URLSearchParams({
     market: filters.market,
-    signal_type: filters.signal_type,
     min_market_cap: String(filters.min_market_cap),
     min_avg_volume: String(filters.min_avg_volume),
     page: String(filters.page),
