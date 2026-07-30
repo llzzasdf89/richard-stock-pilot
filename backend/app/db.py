@@ -36,6 +36,7 @@ def _ensure_schema(active_engine: Engine) -> None:
     }
     additions = {
         "ma20_direction": "VARCHAR",
+        "z_score": "NUMERIC",
         "atr14": "NUMERIC",
         "previous_10d_low": "NUMERIC",
         "previous_10d_high": "NUMERIC",

@@ -17,7 +17,6 @@ router = APIRouter()
 def daily_screenings(
     request: Request,
     market: str = "all",
-    signal_type: str = "all",
     min_market_cap: Decimal = Decimal("200000000000"),
     min_avg_volume: Decimal = Decimal("10000000"),
     page: int = 1,
@@ -29,7 +28,6 @@ def daily_screenings(
         data = list_daily_screenings(
             session=session,
             market=market,
-            signal_type=signal_type,
             min_market_cap=min_market_cap,
             min_avg_volume=min_avg_volume,
             page=page,

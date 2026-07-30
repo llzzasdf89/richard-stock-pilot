@@ -32,6 +32,7 @@ class StockMetricDaily(Base):
     signal_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
     break_percent: Mapped[Decimal | None] = mapped_column(Numeric)
     ma20_direction: Mapped[str | None] = mapped_column(String)
+    z_score: Mapped[Decimal | None] = mapped_column(Numeric)
     atr14: Mapped[Decimal | None] = mapped_column(Numeric)
     previous_10d_low: Mapped[Decimal | None] = mapped_column(Numeric)
     previous_10d_high: Mapped[Decimal | None] = mapped_column(Numeric)

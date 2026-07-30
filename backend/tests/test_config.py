@@ -87,6 +87,7 @@ def test_init_db_adds_technical_indicator_columns_to_existing_metric_table() -> 
     columns = {column["name"] for column in inspect(engine).get_columns("stock_metrics_daily")}
     assert {
         "ma20_direction",
+        "z_score",
         "atr14",
         "previous_10d_low",
         "previous_10d_high",

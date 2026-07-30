@@ -31,7 +31,6 @@ def _metric_row(stock: Stock, metric: StockMetricDaily) -> dict[str, Any]:
         "name": stock.name,
         "market": stock.market,
         "currency": stock.currency,
-        "signal_type": metric.signal_type,
         "earnings_date": stock.earnings_date.isoformat() if stock.earnings_date is not None else None,
         "trade_date": metric.trade_date.isoformat(),
         "close": close,
@@ -41,8 +40,8 @@ def _metric_row(stock: Stock, metric: StockMetricDaily) -> dict[str, Any]:
         "boll_upper": _to_float(metric.boll_upper),
         "boll_mid": _to_float(metric.boll_mid),
         "boll_lower": _to_float(metric.boll_lower),
-        "break_percent": _to_float(metric.break_percent),
         "ma20_direction": metric.ma20_direction,
+        "z_score": _to_float(metric.z_score),
         "atr14": _to_float(metric.atr14),
         "previous_10d_low": _to_float(metric.previous_10d_low),
         "previous_10d_high": _to_float(metric.previous_10d_high),
@@ -55,19 +54,19 @@ def _metric_row(stock: Stock, metric: StockMetricDaily) -> dict[str, Any]:
 def _apply_filters(
     statement: Select[tuple[Stock, StockMetricDaily]],
     market: str,
-    signal_type: str,
     min_market_cap: Decimal,
     min_avg_volume: Decimal,
 ) -> Select[tuple[Stock, StockMetricDaily]]:
     statement = statement.where(
         StockMetricDaily.market_cap >= min_market_cap,
         StockMetricDaily.avg_volume_1m >= min_avg_volume,
-        StockMetricDaily.signal_type != "none",
+        or_(
+            StockMetricDaily.z_score >= Decimal("1.5"),
+            StockMetricDaily.z_score <= Decimal("-1.5"),
+        ),
     )
     if market != "all":
         statement = statement.where(Stock.market == market)
-    if signal_type != "all":
-        statement = statement.where(StockMetricDaily.signal_type == signal_type)
     return statement
 
 
@@ -139,7 +138,6 @@ def _get_earnings_dates(provider: LongbridgeService, symbols: list[str], market:
 def get_daily_screenings(
     session: Session,
     market: str,
-    signal_type: str,
     min_market_cap: Decimal,
     min_avg_volume: Decimal,
     page: int,
@@ -152,7 +150,7 @@ def get_daily_screenings(
     if base is None or latest_date is None:
         return {"data_date": None, "page": page, "page_size": page_size, "total": 0, "results": []}
 
-    filtered = _apply_filters(base, market, signal_type, min_market_cap, min_avg_volume)
+    filtered = _apply_filters(base, market, min_market_cap, min_avg_volume)
     count_statement = select(func.count()).select_from(filtered.subquery())
     total = session.scalar(count_statement) or 0
     rows = session.execute(

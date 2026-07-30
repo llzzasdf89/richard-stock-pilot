@@ -79,6 +79,7 @@ def seed_metric(session: Session) -> None:
             signal_type="upper_breakout",
             break_percent=Decimal("0.012019"),
             ma20_direction="上升",
+            z_score=Decimal("-1.5"),
             atr14=Decimal("2.50"),
             previous_10d_low=Decimal("190.00"),
             previous_10d_high=Decimal("215.00"),
@@ -124,6 +125,7 @@ def seed_cross_market_metrics(session: Session) -> None:
             prev_boll_lower=Decimal("456.00"),
             signal_type="upper_breakout",
             break_percent=Decimal("0.009709"),
+            z_score=Decimal("1.5"),
             created_at=now,
             updated_at=now,
         )
@@ -156,6 +158,9 @@ def test_daily_screenings_return_unified_response_and_log_request(monkeypatch):
     assert row["boll_mid"] == 200
     assert row["boll_lower"] == 192
     assert row["ma20_direction"] == "上升"
+    assert row["z_score"] == -1.5
+    assert "signal_type" not in row
+    assert "break_percent" not in row
     assert row["atr14"] == 2.5
     assert row["previous_10d_low"] == 190
     assert row["previous_10d_high"] == 215
@@ -169,6 +174,22 @@ def test_daily_screenings_return_unified_response_and_log_request(monkeypatch):
         assert log.response_status == 200
         assert "min_market_cap=200000000000" in log.query_params
         assert '"success":true' in log.response_body
+
+
+def test_daily_screenings_exclude_z_scores_inside_threshold(monkeypatch):
+    client, session_factory = build_client(monkeypatch)
+    with session_factory() as session:
+        seed_metric(session)
+        metric = session.scalar(select(StockMetricDaily))
+        metric.z_score = Decimal("1.49")
+        session.commit()
+
+    response = client.get(
+        "/api/daily-screenings",
+        params={"market": "US", "min_market_cap": "200000000000"},
+    )
+
+    assert response.json()["data"]["results"] == []
 
 
 def test_daily_screenings_use_latest_trade_date_per_market_when_market_is_all(monkeypatch):

@@ -268,6 +268,7 @@ def _build_metric(
             )
         ),
         ma20_direction=setup.ma20_direction,
+        z_score=_decimal_or_none(setup.z_score),
         atr14=_decimal_or_none(setup.atr14),
         previous_10d_low=_decimal_or_none(setup.previous_10d_low),
         previous_10d_high=_decimal_or_none(setup.previous_10d_high),
@@ -303,6 +304,7 @@ def _upsert_metric(session: Session, metric: StockMetricDaily) -> None:
         "signal_type",
         "break_percent",
         "ma20_direction",
+        "z_score",
         "atr14",
         "previous_10d_low",
         "previous_10d_high",

@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
@@ -80,6 +81,9 @@ def test_sync_daily_screening_persists_stock_bars_metrics_and_run():
     assert metric.avg_volume_1m > 20_000_000
     assert metric.signal_type == "upper_breakout"
     assert metric.ma20_direction == "上升"
+    assert float(metric.z_score) == pytest.approx(
+        (150 - 119.5) / ((665 / 20) ** 0.5)
+    )
     assert metric.atr14 == Decimal("3.0")
     assert metric.previous_10d_low == Decimal("118.0")
     assert metric.previous_10d_high == Decimal("130.0")
@@ -111,6 +115,7 @@ def test_sync_daily_screening_updates_existing_technical_fields():
     sync_daily_screening(session, ["AAPL.US"], longbridge=provider)
     metric = session.scalar(select(StockMetricDaily))
     metric.ma20_direction = "下降"
+    metric.z_score = Decimal("999")
     metric.atr14 = Decimal("999")
     session.commit()
 
@@ -119,4 +124,7 @@ def test_sync_daily_screening_updates_existing_technical_fields():
     metrics = session.scalars(select(StockMetricDaily)).all()
     assert len(metrics) == 1
     assert metrics[0].ma20_direction == "上升"
+    assert float(metrics[0].z_score) == pytest.approx(
+        (150 - 119.5) / ((665 / 20) ** 0.5)
+    )
     assert metrics[0].atr14 == Decimal("3.0")

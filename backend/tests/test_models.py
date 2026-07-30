@@ -67,6 +67,7 @@ def test_models_persist_stock_metric_and_request_log():
             signal_type="upper_breakout",
             break_percent=Decimal("0.00466"),
             ma20_direction="上升",
+            z_score=Decimal("-1.75"),
             atr14=Decimal("8.25"),
             previous_10d_low=Decimal("340.0"),
             previous_10d_high=Decimal("390.0"),
@@ -113,6 +114,7 @@ def test_models_persist_stock_metric_and_request_log():
 
     assert metric.signal_type == "upper_breakout"
     assert metric.ma20_direction == "上升"
+    assert metric.z_score == Decimal("-1.75")
     assert metric.atr14 == Decimal("8.25")
     assert metric.previous_10d_low == Decimal("340.0")
     assert metric.previous_10d_high == Decimal("390.0")
