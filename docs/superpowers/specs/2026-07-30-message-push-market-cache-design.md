@@ -1,39 +1,48 @@
-# Message Push Market Cache Design
+# 后台消息推送市场缓存设计
 
-## Goal
+## 目标
 
-Add an optional in-memory daily-bar cache for future background message-push scans. The cache must preserve all existing technical-indicator formulas while avoiding repeated historical candlestick requests during hourly US and HK market scans.
+为后续后台消息推送扫描增加一套可选的日 K 内存缓存。在不改变现有技术指标公式的前提下，避免每小时扫描美股和港股时重复请求历史 K 线。
 
-## Scope
+## 本次范围
 
-This change covers:
+本次设计包含：
 
-- the `ENABLE_MESSAGE_PUSH` feature switch;
-- FastAPI lifespan initialization of the message-push cache;
-- independent US and HK cache state;
-- per-market Screener discovery and daily-bar preloading;
-- lazy daily-bar loading for symbols that enter a later Screener result;
-- bounded retries and diagnostic logging.
+- `ENABLE_MESSAGE_PUSH` 功能开关；
+- 在 FastAPI 生命周期中初始化消息推送缓存；
+- 美股和港股缓存独立管理；
+- 按市场执行 Screener 并预加载日 K；
+- 后续 Screener 新增股票时按需补查日 K；
+- 限定重试次数；
+- 记录成功和失败日志。
 
-This change does not add a WeChat provider, a recurring scheduler, notification persistence, or message delivery. Those components may consume this cache later.
+本次暂不包含微信公众号通道、每小时定时器、推送记录持久化和实际消息发送。这些功能后续可以直接使用本缓存。
 
-## Configuration
+## 配置开关
 
-The environment variable is:
+环境变量：
 
 ```env
 ENABLE_MESSAGE_PUSH=false
 ```
 
-It defaults to `false`. When disabled, FastAPI performs no message-push Screener requests, daily-bar preloading, or cache maintenance.
+默认值为 `false`。关闭时，FastAPI 不执行消息推送相关的 Screener 查询、日 K 预加载和缓存维护。
 
-The Python configuration value is named `enable_message_push`.
+Python 配置字段命名为：
 
-## Cache Ownership and Shape
+```python
+enable_message_push
+```
 
-The process-local cache variable is named `message_push_market_cache`.
+## 缓存命名和结构
 
-US and HK are managed independently:
+进程内缓存变量严格命名为：
+
+```python
+message_push_market_cache
+```
+
+美股和港股分别维护：
 
 ```python
 message_push_market_cache = {
@@ -52,111 +61,129 @@ message_push_market_cache = {
 }
 ```
 
-`bars` maps a symbol to its recent daily bars. Each value contains the latest 30 daily bars returned by Longbridge. Indicator calculation continues to exclude the current, incomplete market date and uses the same historical windows and formulas as today.
+字段含义：
 
-`trade_date` is the market date for which the cache was initialized. `cache_ready` states whether that market's complete preload succeeded. `error` is `None` after success and contains the final failure message after an unsuccessful initialization round.
+- `cache_ready`：该市场缓存是否完整可用；
+- `trade_date`：缓存所属的市场交易日；
+- `error`：最近一轮初始化的最终错误信息，成功时为 `None`；
+- `bars`：股票代码到最近 30 根日 K 的映射。
 
-## FastAPI Lifespan Initialization
+计算指标时继续排除当前交易日尚未完成的日 K，并保持现有历史窗口和公式不变。
 
-When `ENABLE_MESSAGE_PUSH=false`, lifespan skips all cache work.
+## FastAPI 启动初始化
 
-When enabled, lifespan initializes US and HK independently. For each market:
+当 `ENABLE_MESSAGE_PUSH=false` 时，生命周期直接跳过所有缓存操作。
 
-1. If `cache_ready` is true and `trade_date` matches the current market trade date, return without querying Longbridge.
-2. Otherwise run the existing Screener with the background-push defaults:
-   - minimum market capitalization: 200 billion;
-   - minimum average monthly volume: 10 million.
-3. Fetch 30 daily bars for every returned symbol under the existing Longbridge SDK rate control.
-4. Build a temporary symbol-to-bars mapping.
-5. Publish the temporary mapping atomically only after every symbol succeeds.
-6. Set `trade_date`, clear `error`, and set `cache_ready=true`.
+开启后，美股和港股分别初始化。单个市场的流程如下：
 
-Initialization of one market does not depend on the other. FastAPI itself still starts if one or both market preloads fail. A later message-push task may process every ready market; it skips message delivery only when neither market is ready.
+1. 如果 `cache_ready=true`，并且 `trade_date` 与当前市场交易日一致，则直接返回，不再查询长桥。
+2. 否则使用后台推送默认条件执行该市场的 Screener：
+   - 最低市值：2000 亿；
+   - 最低月均成交量：1000 万。
+3. 对 Screener 返回的每只股票获取最近 30 根日 K。
+4. 查询结果先写入临时字典。
+5. 只有全部股票查询成功后，才一次性替换正式缓存。
+6. 设置 `trade_date`，清空 `error`，并将 `cache_ready` 设为 `true`。
 
-## Retries and Failures
+两个市场互不依赖。某个市场初始化失败，不影响另一个市场使用。
 
-Each market gets at most three attempts per initialization round.
+FastAPI 本身始终可以正常启动：
 
-- A failed attempt is logged and retried.
-- After the third failure, `cache_ready` remains false and `error` records the final exception text.
-- A successful market is not reloaded because the other market failed.
-- The next hourly message-push scan may start a new, three-attempt initialization round for a failed market.
+- 两个市场都成功：后续可同时推送美股和港股；
+- 只有美股成功：后续只推送美股；
+- 只有港股成功：后续只推送港股；
+- 两个市场都失败：跳过本轮消息推送，但不影响页面和现有 API。
 
-A partially filled temporary mapping is discarded after failure and is never exposed as a ready cache.
+## 重试和错误处理
 
-## Trading-Day Rollover
+每个市场每轮初始化最多尝试 3 次。
 
-Before scanning a market, compare its cached `trade_date` with the current market trade date.
+- 第一次或第二次失败：记录日志后继续重试；
+- 第三次失败：停止本轮重试；
+- 最终失败后保持 `cache_ready=false`；
+- 将最后一次异常文本写入 `error`；
+- 已经成功的市场不会因为另一个市场失败而重新初始化；
+- 下一次每小时扫描时，失败市场可以重新开始一轮最多 3 次的初始化。
 
-When they differ:
+初始化过程中使用临时字典。任何一次失败产生的半成品都会被丢弃，不能暴露为可用缓存。
 
-1. mark only that market as not ready;
-2. clear only that market's bars and error;
-3. initialize that market again.
+## 交易日切换
 
-US rollover never clears HK data, and HK rollover never clears US data. Market dates must use the existing market-aware date conversion rather than the server's local calendar date.
+扫描某个市场前，比较该市场缓存的 `trade_date` 与当前市场交易日。
 
-## Hourly Scan Cache Use
+如果日期不同：
 
-Every hourly scan reruns Screener independently for US and HK so that boundary symbols can enter or leave as market capitalization and volume conditions change.
+1. 只将该市场的 `cache_ready` 设置为 `false`；
+2. 清空该市场的 `bars` 和 `error`；
+3. 重新初始化该市场；
+4. 不影响另一个市场的缓存。
 
-For every returned symbol:
+美股和港股必须根据各自市场日期独立判断，不能直接使用服务器所在时区的自然日统一清理。
 
-- use cached daily bars when present;
-- fetch and cache 30 daily bars when absent;
-- retain bars for a symbol that leaves the current Screener result, because it may re-enter later that trading day.
+## 每小时扫描时的缓存使用
 
-Lazy additions are performed under a per-market lock and are published only after a successful Longbridge response.
+每小时分别重新执行美股和港股 Screener，以便捕捉盘中刚刚跨过市值或成交量门槛的边界股票。
 
-## Indicator Invariants
+对于本轮 Screener 返回的每只股票：
 
-This cache changes data acquisition only. It must not change:
+- 缓存中已经存在：直接复用日 K；
+- 缓存中不存在：向长桥补查最近 30 根日 K，并写入当天该市场缓存；
+- 股票退出本轮 Screener：本轮不计算，但当天缓存暂不删除，方便后续重新进入时直接命中。
 
-- 20-day Bollinger Band calculation;
-- MA20 direction calculation;
-- ATR14 calculation;
-- previous 10-day high and low;
-- reversal-trend and entry-suitability rules;
-- the comparison between previous close, current real-time price, and the historical daily Bollinger Band.
+按需补查需要使用市场级锁，避免并发请求重复查询同一批缺失股票。长桥查询成功后才能将新增数据写入正式缓存。
 
-The existing intraday screening API remains unchanged.
+## 指标计算约束
 
-## Logging
+本缓存只优化数据获取方式，不允许改变以下逻辑：
 
-Every initialization attempt logs an outcome. Logs include:
+- 20 日布林带；
+- MA20 方向；
+- ATR14；
+- 前 10 个交易日最高价和最低价；
+- 反转趋势判断；
+- 是否适合入场判断；
+- 昨日收盘价、当前实时价格与历史日线布林带之间的突破判断。
 
-- operation name;
-- market;
-- market trade date;
-- attempt number;
-- Screener symbol count when available;
-- cached symbol count when available;
-- duration;
-- success or failure;
-- failure message when applicable.
+现有盘中筛选 API 的对外行为保持不变。
 
-Logs must not include Longbridge credentials or access tokens.
+## 日志
 
-Lazy cache misses and trading-day cache resets also produce structured logs with market, symbol count, and outcome.
+每一次初始化尝试，无论成功还是失败，都必须记录日志。至少包含：
 
-## Concurrency
+- 操作名称；
+- 市场；
+- 市场交易日；
+- 当前尝试次数；
+- Screener 返回股票数；
+- 成功缓存股票数；
+- 执行耗时；
+- 成功或失败结果；
+- 失败时的错误信息。
 
-Each market has an independent lock. Cache readiness checks use double-checked locking so concurrent scans cannot initialize the same market twice. Temporary mappings prevent readers from observing a half-built cache.
+日志不得包含长桥密钥、访问令牌等敏感信息。
 
-The first implementation assumes one FastAPI worker. Multiple workers would each own and initialize a separate cache; a future multi-worker deployment should move ownership to a dedicated scheduler process or a shared cache.
+交易日缓存清理和后续按需补查也需要记录日志，包括市场、股票数量和最终结果。
 
-## Tests
+## 并发控制
 
-Automated tests cover:
+美股和港股分别使用独立锁。
 
-- disabled message push performs no preload;
-- US and HK initialize independently;
-- one ready market remains usable when the other fails;
-- both failed markets cause a push scan to skip;
-- a market stops after three failed attempts and records the final error;
-- success and failure attempts are logged;
-- an already-ready cache for the current trade date is not reloaded;
-- a new trade date clears and reloads only the affected market;
-- a later Screener entrant triggers a single lazy daily-bar request;
-- a preload failure never publishes partial bars;
-- existing indicator and API tests remain unchanged and pass.
+缓存初始化采用锁内二次检查，避免多个并发任务重复初始化同一市场。使用临时字典构建完整结果，避免其他读取方看到只加载了一部分的缓存。
+
+第一版按单个 FastAPI Worker 设计。如果未来使用多个 Worker，每个进程都会产生一份独立缓存并重复初始化。届时应将后台扫描固定在独立进程，或者迁移到共享缓存。
+
+## 测试范围
+
+自动化测试需要覆盖：
+
+- 关闭消息推送时不执行任何预加载；
+- 美股和港股可以独立初始化；
+- 一个市场成功、另一个失败时，成功市场仍可使用；
+- 两个市场都失败时跳过消息推送；
+- 单个市场连续失败 3 次后停止并记录最终错误；
+- 每次成功和失败都记录日志；
+- 当前交易日缓存已经准备好时不重复初始化；
+- 新交易日只清理并重新初始化对应市场；
+- 后续 Screener 新增股票时只补查缺失股票；
+- 初始化失败时不能发布半成品缓存；
+- 所有现有指标和 API 测试继续通过。
