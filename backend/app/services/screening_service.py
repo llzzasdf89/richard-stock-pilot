@@ -12,10 +12,7 @@ from app.models.stock import Stock
 from app.models.stock_metric import StockMetricDaily
 from app.services.indicator_service import (
     DailyPriceBar,
-    calculate_bollinger,
-    calculate_break_percent,
     calculate_historical_setup,
-    detect_boll_signal,
 )
 from app.services.longbridge_service import LongbridgeService
 
@@ -172,7 +169,6 @@ def get_daily_screenings(
 def get_intraday_screenings(
     session: Session,
     market: str,
-    signal_type: str,
     min_market_cap: Decimal,
     min_avg_volume: Decimal,
     interval: str,
@@ -243,20 +239,9 @@ def get_intraday_screenings(
             ],
             current_price=latest_price,
         )
-        historical_closes = [bar.close for bar in historical_daily_bars]
-        historical_bands = calculate_bollinger(historical_closes, period=20, std_multiplier=2)
-        current = historical_bands[-1] if historical_bands else {"mid": None, "upper": None, "lower": None}
-        if None in (current["mid"], current["upper"], current["lower"]):
+        if setup.z_score is None or -1.5 < setup.z_score < 1.5:
             continue
-        current_signal = detect_boll_signal(
-            prev_close=previous_close,
-            close=latest_price,
-            prev_upper=float(current["upper"]),
-            upper=float(current["upper"]),
-            prev_lower=float(current["lower"]),
-            lower=float(current["lower"]),
-        )
-        if current_signal == "none" or (signal_type != "all" and signal_type != current_signal):
+        if None in (setup.boll_mid, setup.boll_upper, setup.boll_lower):
             continue
         results.append(
             {
@@ -264,7 +249,6 @@ def get_intraday_screenings(
                 "name": security.name,
                 "market": row_market,
                 "currency": "USD" if security.symbol.endswith(".US") else "HKD",
-                "signal_type": current_signal,
                 "earnings_date": earnings_dates.get(security.symbol).isoformat()
                 if earnings_dates.get(security.symbol) is not None
                 else None,
@@ -274,16 +258,11 @@ def get_intraday_screenings(
                 "latest_price": latest_price,
                 "market_cap": _to_float(security.market_cap),
                 "avg_volume_1m": avg_volume,
-                "boll_upper": current["upper"],
-                "boll_mid": current["mid"],
-                "boll_lower": current["lower"],
-                "break_percent": calculate_break_percent(
-                    current_signal,
-                    close=latest_price,
-                    upper=float(current["upper"]),
-                    lower=float(current["lower"]),
-                ),
+                "boll_upper": setup.boll_upper,
+                "boll_mid": setup.boll_mid,
+                "boll_lower": setup.boll_lower,
                 "ma20_direction": setup.ma20_direction,
+                "z_score": setup.z_score,
                 "atr14": setup.atr14,
                 "previous_10d_low": setup.previous_10d_low,
                 "previous_10d_high": setup.previous_10d_high,

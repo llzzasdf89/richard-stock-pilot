@@ -11,7 +11,6 @@ from app.services.screening_service import get_intraday_screenings
 def list_intraday_screenings(
     session: Session,
     market: str = "all",
-    signal_type: str = "all",
     min_market_cap: Decimal = Decimal("200000000000"),
     min_avg_volume: Decimal = Decimal("10000000"),
     interval: str = "5m",
@@ -21,7 +20,6 @@ def list_intraday_screenings(
     return get_intraday_screenings(
         session=session,
         market=market,
-        signal_type=signal_type,
         min_market_cap=min_market_cap,
         min_avg_volume=min_avg_volume,
         interval=interval,

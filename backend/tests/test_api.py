@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -225,7 +226,6 @@ def test_intraday_screenings_fetch_latest_market_data_without_daily_metrics(monk
         "/api/intraday-screenings",
         params={
             "market": "US",
-            "signal_type": "upper_breakout",
             "min_market_cap": "200000000000",
             "min_avg_volume": "10000000",
             "interval": "5m",
@@ -299,7 +299,6 @@ def test_intraday_screenings_passes_slider_filters_to_longbridge_screener(monkey
         "/api/intraday-screenings",
         params={
             "market": "US",
-            "signal_type": "all",
             "min_market_cap": "200000000000",
             "min_avg_volume": "10000000",
             "interval": "5m",
@@ -336,10 +335,10 @@ def test_intraday_screenings_returns_previous_close_and_latest_session_price(mon
             completed = [
                 MarketDataBar(
                     time=start + timedelta(days=index),
-                    open=100,
-                    high=101,
-                    low=99,
-                    close=100,
+                    open=100 + index,
+                    high=101 + index,
+                    low=99 + index,
+                    close=100 + index,
                     volume=20_000_000,
                     turnover=Decimal("100000000"),
                 )
@@ -367,7 +366,7 @@ def test_intraday_screenings_returns_previous_close_and_latest_session_price(mon
         def get_latest_quotes(self, symbols):
             now = datetime(2026, 7, 22, 14, 30, tzinfo=timezone.utc)
             return {
-                symbol: LatestQuote(symbol=symbol, price=110, previous_close=99, time=now, session="overnight")
+                symbol: LatestQuote(symbol=symbol, price=125, previous_close=99, time=now, session="overnight")
                 for symbol in symbols
             }
 
@@ -382,7 +381,6 @@ def test_intraday_screenings_returns_previous_close_and_latest_session_price(mon
         "/api/intraday-screenings",
         params={
             "market": "US",
-            "signal_type": "upper_breakout",
             "min_market_cap": "200000000000",
             "min_avg_volume": "10000000",
             "interval": "5m",
@@ -398,7 +396,6 @@ def test_intraday_screenings_returns_previous_close_and_latest_session_price(mon
         "/api/intraday-screenings",
         params={
             "market": "US",
-            "signal_type": "upper_breakout",
             "min_market_cap": "200000000000",
             "min_avg_volume": "10000000",
             "interval": "5m",
@@ -411,15 +408,16 @@ def test_intraday_screenings_returns_previous_close_and_latest_session_price(mon
     assert body["success"] is True
     assert body["data"]["total"] == 1
     assert row["close"] == 99
-    assert row["latest_price"] == 110
-    assert row["boll_upper"] == 100
-    assert row["boll_mid"] == 100
-    assert row["boll_lower"] == 100
-    assert row["signal_type"] == "upper_breakout"
-    assert row["ma20_direction"] == "需人工判断"
+    assert row["latest_price"] == 125
+    assert row["boll_mid"] == 115.5
+    assert row["latest_price"] < row["boll_upper"]
+    assert row["z_score"] == pytest.approx((125 - 115.5) / ((665 / 20) ** 0.5))
+    assert "signal_type" not in row
+    assert "break_percent" not in row
+    assert row["ma20_direction"] == "上升"
     assert row["atr14"] == 2
-    assert row["previous_10d_low"] == 99
-    assert row["previous_10d_high"] == 101
+    assert row["previous_10d_low"] == 115
+    assert row["previous_10d_high"] == 126
     assert row["has_reversal_trend"] == "否"
     assert row["is_suitable_for_entry"] == "否"
     assert row["earnings_date"] == "2026-07-23"
