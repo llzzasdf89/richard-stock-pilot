@@ -232,7 +232,23 @@ def test_calculate_historical_setup_detects_short_reversal_using_z_threshold():
     assert reversal.is_suitable_for_entry == "否"
 
 
-def test_calculate_historical_setup_returns_all_none_with_insufficient_history():
-    result = calculate_historical_setup(_daily_bars([100.0] * 24), current_price=100)
+def test_calculate_historical_setup_returns_all_none_with_nineteen_days():
+    result = calculate_historical_setup(_daily_bars([100.0] * 19), current_price=100)
 
     assert all(value is None for value in vars(result).values())
+
+
+@pytest.mark.parametrize("history_size", [20, 24])
+def test_calculate_historical_setup_returns_z_score_before_direction_history_is_available(
+    history_size,
+):
+    result = calculate_historical_setup(
+        _daily_bars([float(value) for value in range(1, history_size + 1)]),
+        current_price=30,
+    )
+
+    assert result.z_score is not None
+    assert result.boll_mid is not None
+    assert result.ma20_direction is None
+    assert result.has_reversal_trend is None
+    assert result.is_suitable_for_entry is None

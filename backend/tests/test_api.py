@@ -197,6 +197,14 @@ def test_daily_screenings_use_latest_trade_date_per_market_when_market_is_all(mo
     client, session_factory = build_client(monkeypatch)
     with session_factory() as session:
         seed_cross_market_metrics(session)
+        metrics = session.scalars(select(StockMetricDaily)).all()
+        us_metric = next(metric for metric in metrics if metric.stock.market == "US")
+        hk_metric = next(metric for metric in metrics if metric.stock.market == "HK")
+        us_metric.z_score = Decimal("-2")
+        us_metric.break_percent = Decimal("0.001")
+        hk_metric.z_score = Decimal("1.5")
+        hk_metric.break_percent = Decimal("0.02")
+        session.commit()
 
     response = client.get(
         "/api/daily-screenings",
@@ -211,11 +219,11 @@ def test_daily_screenings_use_latest_trade_date_per_market_when_market_is_all(mo
     )
 
     body = response.json()
-    symbols = {row["symbol"] for row in body["data"]["results"]}
+    symbols = [row["symbol"] for row in body["data"]["results"]]
     assert response.status_code == 200
     assert body["success"] is True
     assert body["data"]["total"] == 2
-    assert symbols == {"AAPL.US", "700.HK"}
+    assert symbols == ["AAPL.US", "700.HK"]
 
 
 def test_intraday_screenings_fetch_latest_market_data_without_daily_metrics(monkeypatch):

@@ -151,7 +151,10 @@ def get_daily_screenings(
     count_statement = select(func.count()).select_from(filtered.subquery())
     total = session.scalar(count_statement) or 0
     rows = session.execute(
-        filtered.order_by(StockMetricDaily.break_percent.desc())
+        filtered.order_by(
+            func.abs(StockMetricDaily.z_score).desc(),
+            Stock.symbol.asc(),
+        )
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).all()

@@ -106,8 +106,7 @@ def calculate_historical_setup(
         for bar in sorted(bars, key=lambda item: item.trade_date)
     }
     normalized = list(normalized_by_date.values())
-    minimum_history = max(25, boll_period + 5, 15)
-    if len(normalized) < minimum_history:
+    if len(normalized) < max(20, boll_period):
         return _empty_historical_setup()
 
     closes = [bar.close for bar in normalized]
@@ -119,6 +118,30 @@ def calculate_historical_setup(
         z_score = -1.5
     elif isclose(z_score, 1.5):
         z_score = 1.5
+    current_band = calculate_bollinger(
+        closes[-boll_period:],
+        period=boll_period,
+        std_multiplier=boll_std_multiplier,
+    )[-1]
+    if None in (current_band["mid"], current_band["upper"], current_band["lower"]):
+        return _empty_historical_setup()
+    boll_mid = float(current_band["mid"])
+    boll_upper = float(current_band["upper"])
+    boll_lower = float(current_band["lower"])
+    if len(normalized) < max(25, boll_period + 5, 15):
+        return HistoricalSetup(
+            ma20_direction=None,
+            z_score=z_score,
+            atr14=None,
+            previous_10d_low=None,
+            previous_10d_high=None,
+            boll_mid=boll_mid,
+            boll_upper=boll_upper,
+            boll_lower=boll_lower,
+            has_reversal_trend=None,
+            is_suitable_for_entry=None,
+        )
+
     comparison_ma20 = sum(closes[-25:-5]) / 20
     ma_delta = current_ma20 - comparison_ma20
     if ma_delta > 0:
@@ -127,14 +150,6 @@ def calculate_historical_setup(
         ma20_direction = "下降"
     else:
         ma20_direction = "需人工判断"
-
-    current_band = calculate_bollinger(
-        closes[-boll_period:],
-        period=boll_period,
-        std_multiplier=boll_std_multiplier,
-    )[-1]
-    if None in (current_band["mid"], current_band["upper"], current_band["lower"]):
-        return _empty_historical_setup()
 
     atr_bars = normalized[-14:]
     previous_close = normalized[-15].close
@@ -145,10 +160,6 @@ def calculate_historical_setup(
     atr14 = sum(true_ranges) / 14
     previous_10d_low = min(bar.low for bar in normalized[-10:])
     previous_10d_high = max(bar.high for bar in normalized[-10:])
-    boll_mid = float(current_band["mid"])
-    boll_upper = float(current_band["upper"])
-    boll_lower = float(current_band["lower"])
-
     long_z_extreme = z_score < -1.5 or isclose(z_score, -1.5)
     short_z_extreme = z_score > 1.5 or isclose(z_score, 1.5)
     long_reversal = (
