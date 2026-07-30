@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from math import sqrt
+from math import isclose, sqrt
 
 
 Band = dict[str, float | None]
@@ -19,6 +19,7 @@ class DailyPriceBar:
 @dataclass(frozen=True)
 class HistoricalSetup:
     ma20_direction: str | None
+    z_score: float | None
     atr14: float | None
     previous_10d_low: float | None
     previous_10d_high: float | None
@@ -111,6 +112,9 @@ def calculate_historical_setup(
 
     closes = [bar.close for bar in normalized]
     current_ma20 = sum(closes[-20:]) / 20
+    variance = sum((close - current_ma20) ** 2 for close in closes[-20:]) / 20
+    sd20 = sqrt(variance)
+    z_score = 0.0 if sd20 == 0 else (current_price - current_ma20) / sd20
     comparison_ma20 = sum(closes[-25:-5]) / 20
     ma_delta = current_ma20 - comparison_ma20
     if ma_delta > 0:
@@ -141,29 +145,32 @@ def calculate_historical_setup(
     boll_upper = float(current_band["upper"])
     boll_lower = float(current_band["lower"])
 
+    long_z_extreme = z_score < -1.5 or isclose(z_score, -1.5)
+    short_z_extreme = z_score > 1.5 or isclose(z_score, 1.5)
     long_reversal = (
         ma20_direction == "上升"
-        and current_price <= boll_lower
+        and long_z_extreme
         and current_price < previous_10d_low - 0.25 * atr14
     )
     short_reversal = (
         ma20_direction == "下降"
-        and current_price >= boll_upper
+        and short_z_extreme
         and current_price > previous_10d_high + 0.25 * atr14
     )
     has_reversal_trend = "是" if long_reversal or short_reversal else "否"
     suitable_long = (
         ma20_direction == "上升"
-        and current_price <= boll_lower
+        and long_z_extreme
         and has_reversal_trend == "否"
     )
     suitable_short = (
         ma20_direction == "下降"
-        and current_price >= boll_upper
+        and short_z_extreme
         and has_reversal_trend == "否"
     )
     return HistoricalSetup(
         ma20_direction=ma20_direction,
+        z_score=z_score,
         atr14=atr14,
         previous_10d_low=previous_10d_low,
         previous_10d_high=previous_10d_high,
@@ -178,6 +185,7 @@ def calculate_historical_setup(
 def _empty_historical_setup() -> HistoricalSetup:
     return HistoricalSetup(
         ma20_direction=None,
+        z_score=None,
         atr14=None,
         previous_10d_low=None,
         previous_10d_high=None,

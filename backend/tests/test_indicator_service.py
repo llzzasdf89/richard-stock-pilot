@@ -1,5 +1,7 @@
 from datetime import date, timedelta
 
+import pytest
+
 from app.services.indicator_service import (
     DailyPriceBar,
     calculate_bollinger,
@@ -133,7 +135,44 @@ def test_calculate_historical_setup_averages_fourteen_true_ranges():
     assert result.atr14 == 4
 
 
-def test_calculate_historical_setup_detects_long_reversal_and_entry():
+def test_calculate_historical_setup_calculates_population_z_score():
+    bars = _daily_bars([float(value) for value in range(1, 26)])
+
+    result = calculate_historical_setup(bars, current_price=30)
+
+    expected_ma = 15.5
+    expected_sd = (665 / 20) ** 0.5
+    assert result.z_score == pytest.approx((30 - expected_ma) / expected_sd)
+
+
+def test_calculate_historical_setup_returns_zero_z_score_when_sd20_is_zero():
+    result = calculate_historical_setup(
+        _daily_bars([100.0] * 25),
+        current_price=120,
+    )
+
+    assert result.z_score == 0
+
+
+def test_calculate_historical_setup_uses_negative_z_threshold_without_boll_for_long_entry():
+    bars = _daily_bars([float(value) for value in range(100, 125)])
+    bars[-10:] = [
+        DailyPriceBar(bar.trade_date, high=bar.high, low=80, close=bar.close)
+        for bar in bars[-10:]
+    ]
+    ma20 = 114.5
+    sd20 = (665 / 20) ** 0.5
+    threshold_price = ma20 - 1.5 * sd20
+    entry = calculate_historical_setup(bars, current_price=threshold_price)
+
+    assert entry.boll_lower is not None
+    assert threshold_price > entry.boll_lower
+    assert entry.z_score == pytest.approx(-1.5)
+    assert entry.has_reversal_trend == "否"
+    assert entry.is_suitable_for_entry == "是"
+
+
+def test_calculate_historical_setup_detects_long_reversal_using_z_threshold():
     bars = _daily_bars([float(value) for value in range(100, 125)])
     bars[-10:] = [
         DailyPriceBar(bar.trade_date, high=bar.high, low=80, close=bar.close)
@@ -145,19 +184,34 @@ def test_calculate_historical_setup_detects_long_reversal_and_entry():
     assert baseline.atr14 is not None
 
     reversal_price = min(
-        baseline.boll_lower,
+        114.5 - 1.5 * (665 / 20) ** 0.5,
         baseline.previous_10d_low - 0.25 * baseline.atr14 - 0.01,
     )
     reversal = calculate_historical_setup(bars, current_price=reversal_price)
-    entry = calculate_historical_setup(bars, current_price=baseline.boll_lower)
 
     assert reversal.has_reversal_trend == "是"
     assert reversal.is_suitable_for_entry == "否"
+
+
+def test_calculate_historical_setup_uses_positive_z_threshold_without_boll_for_short_entry():
+    bars = _daily_bars([float(value) for value in range(125, 100, -1)])
+    bars[-10:] = [
+        DailyPriceBar(bar.trade_date, high=145, low=bar.low, close=bar.close)
+        for bar in bars[-10:]
+    ]
+    ma20 = 110.5
+    sd20 = (665 / 20) ** 0.5
+    threshold_price = ma20 + 1.5 * sd20
+    entry = calculate_historical_setup(bars, current_price=threshold_price)
+
+    assert entry.boll_upper is not None
+    assert threshold_price < entry.boll_upper
+    assert entry.z_score == pytest.approx(1.5)
     assert entry.has_reversal_trend == "否"
     assert entry.is_suitable_for_entry == "是"
 
 
-def test_calculate_historical_setup_detects_short_reversal_and_entry():
+def test_calculate_historical_setup_detects_short_reversal_using_z_threshold():
     bars = _daily_bars([float(value) for value in range(125, 100, -1)])
     bars[-10:] = [
         DailyPriceBar(bar.trade_date, high=145, low=bar.low, close=bar.close)
@@ -169,16 +223,13 @@ def test_calculate_historical_setup_detects_short_reversal_and_entry():
     assert baseline.atr14 is not None
 
     reversal_price = max(
-        baseline.boll_upper,
+        110.5 + 1.5 * (665 / 20) ** 0.5,
         baseline.previous_10d_high + 0.25 * baseline.atr14 + 0.01,
     )
     reversal = calculate_historical_setup(bars, current_price=reversal_price)
-    entry = calculate_historical_setup(bars, current_price=baseline.boll_upper)
 
     assert reversal.has_reversal_trend == "是"
     assert reversal.is_suitable_for_entry == "否"
-    assert entry.has_reversal_trend == "否"
-    assert entry.is_suitable_for_entry == "是"
 
 
 def test_calculate_historical_setup_returns_all_none_with_insufficient_history():
