@@ -115,6 +115,10 @@ def calculate_historical_setup(
     variance = sum((close - current_ma20) ** 2 for close in closes[-20:]) / 20
     sd20 = sqrt(variance)
     z_score = 0.0 if sd20 == 0 else (current_price - current_ma20) / sd20
+    if isclose(z_score, -1.5):
+        z_score = -1.5
+    elif isclose(z_score, 1.5):
+        z_score = 1.5
     comparison_ma20 = sum(closes[-25:-5]) / 20
     ma_delta = current_ma20 - comparison_ma20
     if ma_delta > 0:

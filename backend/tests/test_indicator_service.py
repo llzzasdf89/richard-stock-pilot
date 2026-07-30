@@ -167,7 +167,7 @@ def test_calculate_historical_setup_uses_negative_z_threshold_without_boll_for_l
 
     assert entry.boll_lower is not None
     assert threshold_price > entry.boll_lower
-    assert entry.z_score == pytest.approx(-1.5)
+    assert entry.z_score == -1.5
     assert entry.has_reversal_trend == "否"
     assert entry.is_suitable_for_entry == "是"
 
@@ -206,7 +206,7 @@ def test_calculate_historical_setup_uses_positive_z_threshold_without_boll_for_s
 
     assert entry.boll_upper is not None
     assert threshold_price < entry.boll_upper
-    assert entry.z_score == pytest.approx(1.5)
+    assert entry.z_score == 1.5
     assert entry.has_reversal_trend == "否"
     assert entry.is_suitable_for_entry == "是"
 
