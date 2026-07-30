@@ -202,7 +202,6 @@ def test_daily_screenings_use_latest_trade_date_per_market_when_market_is_all(mo
         "/api/daily-screenings",
         params={
             "market": "all",
-            "signal_type": "all",
             "min_market_cap": "200000000000",
             "min_avg_volume": "10000000",
             "page": 1,

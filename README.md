@@ -1,11 +1,11 @@
 # Richard Stock Pilot
 
-Richard Stock Pilot is a React + FastAPI stock screening app for US and HK stocks. The first version focuses on Bollinger Band breakout/breakdown screening with configurable market cap and average monthly volume filters.
+Richard Stock Pilot is a React + FastAPI stock screening app for US and HK stocks. It selects stocks whose Z-Score is at least 1.5 or at most -1.5, with configurable market cap and average monthly volume filters.
 
 ## Current Scope
 
 - Daily screening: reads stored daily metrics from SQLite.
-- Intraday screening: discovers Longbridge screener indicators, runs screener search with the slider filters, then fetches daily and intraday bars for local Bollinger calculations.
+- Intraday screening: discovers Longbridge screener indicators, runs screener search with the slider filters, then fetches daily and intraday bars for local Z-Score and reference Bollinger calculations.
 - Chinese UI.
 - Two application APIs:
   - `GET /api/daily-screenings`
@@ -69,7 +69,7 @@ MESSAGE_PUSH_PROVIDER=pushplus
 PUSHPLUS_TOKEN=your PushPlus token
 ```
 
-开启后，FastAPI 启动时分别预热美股和港股的历史日 K 缓存，并在每个中国时间整点重新筛选。只有符合现有建仓条件的股票才会通过 PushPlus 逐只发送；没有匹配股票时不会发送消息。
+开启后，FastAPI 启动时分别预热美股和港股的历史日 K 缓存，并在每个中国时间整点重新筛选。只有符合 Z-Score 建仓条件的股票才会通过 PushPlus 逐只发送；没有匹配股票时不会发送消息。
 
 本功能不需要公网 IP 或域名，本地电脑也可以运行。电脑必须保持开机、联网且不进入休眠。后台定时任务第一版只支持单 Worker；不要同时启动多个 FastAPI Worker，否则会重复扫描和推送。
 
@@ -119,9 +119,17 @@ cd backend
 uv run python -m app.scripts.sync_daily_screening --symbols AAPL.US 700.HK
 ```
 
-This command pulls static info, market cap, and daily candlesticks, computes BOLL metrics, and persists rows used by `GET /api/daily-screenings`.
+This command pulls static info, market cap, and daily candlesticks, computes Z-Score and reference BOLL metrics, and persists rows used by `GET /api/daily-screenings`.
 
-`GET /api/intraday-screenings` does not depend on the daily metric table. It calls Longbridge screener indicators first, maps the slider filters to screener conditions, runs screener search, then fetches bars for the returned candidates and calculates intraday BOLL signals without persistence.
+`GET /api/intraday-screenings` does not depend on the daily metric table. It calls Longbridge screener indicators first, maps the slider filters to screener conditions, runs screener search, then fetches bars for the returned candidates and calculates Z-Score without persistence.
+
+Z-Score uses the current price and the 20 complete trading days before the evaluation day:
+
+```text
+Z-Score = (current price - MA20) / SD20
+```
+
+SD20 is the population standard deviation of the same 20 closes and therefore includes a square root. When SD20 is zero, Z-Score is defined as zero. Daily and intraday results include the inclusive thresholds `Z-Score >= 1.5` and `Z-Score <= -1.5`. BOLL rails remain visible as reference values but do not gate results.
 
 ## Frontend
 
@@ -145,13 +153,13 @@ The frontend sends an `X-Request-ID` header with every API request. The backend 
 Daily:
 
 ```http
-GET /api/daily-screenings?market=all&signal_type=all&min_market_cap=200000000000&min_avg_volume=10000000&page=1&page_size=50
+GET /api/daily-screenings?market=all&min_market_cap=200000000000&min_avg_volume=10000000&page=1&page_size=50
 ```
 
 Intraday:
 
 ```http
-GET /api/intraday-screenings?market=all&signal_type=all&min_market_cap=200000000000&min_avg_volume=10000000&interval=5m&page=1&page_size=50
+GET /api/intraday-screenings?market=all&min_market_cap=200000000000&min_avg_volume=10000000&interval=5m&page=1&page_size=50
 ```
 
 ## Out Of Scope For V1
