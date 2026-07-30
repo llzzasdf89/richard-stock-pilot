@@ -26,19 +26,19 @@ class ScanSummary:
     failed: int
 
 
-def derive_entry_direction(setup: HistoricalSetup, price: float) -> str | None:
+def derive_entry_direction(setup: HistoricalSetup) -> str | None:
     if setup.is_suitable_for_entry != "是" or setup.has_reversal_trend != "否":
         return None
     if (
         setup.ma20_direction == "上升"
-        and setup.boll_lower is not None
-        and price <= setup.boll_lower
+        and setup.z_score is not None
+        and setup.z_score <= -1.5
     ):
         return "做多"
     if (
         setup.ma20_direction == "下降"
-        and setup.boll_upper is not None
-        and price >= setup.boll_upper
+        and setup.z_score is not None
+        and setup.z_score >= 1.5
     ):
         return "做空"
     return None
@@ -63,8 +63,8 @@ def build_pushplus_message(
         ("布林中轨", f"{opportunity['boll_mid']:.2f}"),
         ("布林下轨", f"{opportunity['boll_lower']:.2f}"),
         ("MA20方向", opportunity["ma20_direction"]),
+        ("Z-Score", f"{opportunity['z_score']:.2f}"),
         ("ATR14", f"{opportunity['atr14']:.2f}"),
-        ("突破幅度", f"{opportunity['break_percent']:.2%}"),
         ("扫描时间", china_time.strftime("%Y-%m-%d %H:%M:%S")),
     ]
     content = "<br>".join(
@@ -121,18 +121,17 @@ class MessagePushScanService:
                     if _market_date(bar.time, market) < evaluation_date
                 ]
                 setup = calculate_historical_setup(historical, current_price=quote.price)
-                direction = derive_entry_direction(setup, quote.price)
+                direction = derive_entry_direction(setup)
                 if direction is None:
                     continue
                 matched += 1
-                boundary = setup.boll_lower if direction == "做多" else setup.boll_upper
-                if boundary is None:
+                if None in (
+                    setup.boll_upper,
+                    setup.boll_mid,
+                    setup.boll_lower,
+                    setup.z_score,
+                ):
                     continue
-                break_percent = (
-                    (boundary - quote.price) / boundary
-                    if direction == "做多"
-                    else (quote.price - boundary) / boundary
-                )
                 opportunity = {
                     "market": market,
                     "symbol": security.symbol,
@@ -144,8 +143,8 @@ class MessagePushScanService:
                     "boll_mid": setup.boll_mid,
                     "boll_lower": setup.boll_lower,
                     "ma20_direction": setup.ma20_direction,
+                    "z_score": setup.z_score,
                     "atr14": setup.atr14,
-                    "break_percent": break_percent,
                 }
                 title, content = build_pushplus_message(opportunity, china_now)
                 self.sender.send_message(title, content)
