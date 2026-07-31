@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from app.services.indicator_service import DailyPriceBar, HistoricalSetup, calculate_historical_setup
 from app.services.longbridge_service import LongbridgeService
 from app.services.message_push_cache_service import MessagePushCacheService
+from app.services.message_push_settings_service import MessagePushSettingsSnapshot
 from app.services.pushplus_message_service import PushPlusMessageService
 
 
@@ -84,21 +85,32 @@ class MessagePushScanService:
         self.longbridge = longbridge
         self.sender = sender
 
-    async def run_once(self, china_now: datetime | None = None) -> list[ScanSummary]:
+    async def run_once(
+        self,
+        settings: MessagePushSettingsSnapshot,
+        china_now: datetime | None = None,
+    ) -> list[ScanSummary]:
         now = china_now or datetime.now(timezone.utc)
         summaries: list[ScanSummary] = []
         for market in ("US", "HK"):
             try:
                 if not self.cache_service.is_trading_day(market, now):
                     continue
-                summaries.append(await self.scan_market(market, now))
+                summaries.append(await self.scan_market(market, now, settings))
             except Exception:
                 logger.exception("message_push_scan market=%s result=error", market)
         return summaries
 
-    async def scan_market(self, market: str, china_now: datetime) -> ScanSummary:
+    async def scan_market(
+        self,
+        market: str,
+        china_now: datetime,
+        settings: MessagePushSettingsSnapshot,
+    ) -> ScanSummary:
         securities, bars_by_symbol = await self.cache_service.screen_with_cached_bars(
-            market, china_now
+            market,
+            china_now,
+            settings,
         )
         symbols = [security.symbol for security in securities]
         quotes = self.longbridge.get_latest_quotes(symbols) if symbols else {}

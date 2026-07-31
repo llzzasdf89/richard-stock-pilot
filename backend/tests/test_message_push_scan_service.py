@@ -12,6 +12,7 @@ from app.services.message_push_scan_service import (
     build_pushplus_message,
     derive_entry_direction,
 )
+from app.services.message_push_settings_service import MessagePushSettingsSnapshot
 
 
 def setup(direction: str, z_score: float, suitable: str = "是") -> HistoricalSetup:
@@ -26,6 +27,15 @@ def setup(direction: str, z_score: float, suitable: str = "是") -> HistoricalSe
         boll_lower=90,
         has_reversal_trend="否",
         is_suitable_for_entry=suitable,
+    )
+
+
+def snapshot(interval_minutes: int = 60) -> MessagePushSettingsSnapshot:
+    return MessagePushSettingsSnapshot(
+        interval_minutes=interval_minutes,
+        min_market_cap=Decimal("200000000000"),
+        min_avg_volume=Decimal("10000000"),
+        updated_at=None,
     )
 
 
@@ -63,10 +73,14 @@ def test_message_has_required_fields_and_no_detail_link():
 
 
 class FakeCache:
+    def __init__(self):
+        self.settings_by_market = {}
+
     def is_trading_day(self, market, now):
         return True
 
-    async def screen_with_cached_bars(self, market, now):
+    async def screen_with_cached_bars(self, market, now, settings):
+        self.settings_by_market[market] = settings
         symbol = "AAPL.US" if market == "US" else "700.HK"
         security = Security(symbol, "Apple" if market == "US" else "腾讯", Decimal("3000000000000"))
         start = datetime(2026, 7, 1, tzinfo=timezone.utc)
@@ -127,7 +141,7 @@ def test_run_once_sends_one_message_per_matching_stock_for_both_markets():
     service = MessagePushScanService(FakeCache(), FakeLongbridge(), sender)
 
     summaries = asyncio.run(
-        service.run_once(datetime(2026, 7, 30, 9, tzinfo=timezone.utc))
+        service.run_once(snapshot(), datetime(2026, 7, 30, 9, tzinfo=timezone.utc))
     )
 
     assert [summary.market for summary in summaries] == ["US", "HK"]
@@ -143,8 +157,22 @@ def test_scan_market_uses_scan_date_when_latest_quote_is_from_previous_day():
         service.scan_market(
             "US",
             datetime(2026, 7, 31, 15, tzinfo=ZoneInfo("America/New_York")),
+            snapshot(),
         )
     )
 
     assert summary.sent == 1
     assert "布林中轨：110.50" in sender.messages[0][1]
+
+
+def test_both_markets_receive_the_same_snapshot():
+    cache = FakeCache()
+    service = MessagePushScanService(cache, FakeLongbridge(), FakeSender())
+    settings = snapshot(interval_minutes=30)
+
+    asyncio.run(
+        service.run_once(settings, datetime(2026, 7, 30, 9, tzinfo=timezone.utc))
+    )
+
+    assert cache.settings_by_market == {"US": settings, "HK": settings}
+    assert cache.settings_by_market["US"] is cache.settings_by_market["HK"]

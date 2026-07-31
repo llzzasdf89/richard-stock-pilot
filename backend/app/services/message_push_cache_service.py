@@ -2,19 +2,17 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, datetime
-from decimal import Decimal
 import logging
 import time
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 from app.services.longbridge_service import LongbridgeService, MarketDataBar, Security
+from app.services.message_push_settings_service import MessagePushSettingsSnapshot
 
 
 logger = logging.getLogger(__name__)
 CHINA_TIMEZONE = ZoneInfo("Asia/Shanghai")
-MIN_MARKET_CAP = Decimal("200000000000")
-MIN_AVG_VOLUME = Decimal("10000000")
 
 
 def new_message_push_market_cache() -> dict[str, dict[str, Any]]:
@@ -79,7 +77,12 @@ class MessagePushCacheService:
         )
         return fallback
 
-    async def prepare_market(self, market: str, china_now: datetime) -> bool:
+    async def prepare_market(
+        self,
+        market: str,
+        china_now: datetime,
+        settings: MessagePushSettingsSnapshot,
+    ) -> bool:
         current_date = self.china_date(china_now)
         async with self._locks[market]:
             state = self.cache[market]
@@ -93,7 +96,9 @@ class MessagePushCacheService:
                 started = time.monotonic()
                 try:
                     securities = self.longbridge.screen_securities(
-                        market, MIN_MARKET_CAP, MIN_AVG_VOLUME
+                        market,
+                        settings.min_market_cap,
+                        settings.min_avg_volume,
                     )
                     temporary = {
                         security.symbol: self.longbridge.get_daily_bars(
@@ -133,13 +138,18 @@ class MessagePushCacheService:
             return False
 
     async def screen_with_cached_bars(
-        self, market: str, china_now: datetime
+        self,
+        market: str,
+        china_now: datetime,
+        settings: MessagePushSettingsSnapshot,
     ) -> tuple[list[Security], dict[str, list[MarketDataBar]]]:
-        if not await self.prepare_market(market, china_now):
+        if not await self.prepare_market(market, china_now, settings):
             return [], {}
         async with self._locks[market]:
             securities = self.longbridge.screen_securities(
-                market, MIN_MARKET_CAP, MIN_AVG_VOLUME
+                market,
+                settings.min_market_cap,
+                settings.min_avg_volume,
             )
             state_bars = self.cache[market]["bars"]
             for security in securities:

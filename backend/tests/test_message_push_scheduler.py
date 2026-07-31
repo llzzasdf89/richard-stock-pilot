@@ -37,9 +37,11 @@ def snapshot(interval_minutes: int) -> MessagePushSettingsSnapshot:
 class RecordingScanner:
     def __init__(self):
         self.calls = 0
+        self.settings = []
 
-    async def run_once(self):
+    async def run_once(self, settings):
         self.calls += 1
+        self.settings.append(settings)
 
 
 def test_settings_change_wakes_scheduler_without_scanning():
@@ -56,7 +58,7 @@ def test_settings_change_wakes_scheduler_without_scanning():
 def test_settings_change_recomputes_boundary_without_scanning():
     async def scenario():
         scanner = CancellingScanner()
-        loaded_intervals = iter((60, 30))
+        loaded_intervals = iter((60, 30, 30))
         loader_calls = []
         wait_results = iter(("settings_changed", "boundary"))
 
@@ -78,7 +80,7 @@ def test_settings_change_recomputes_boundary_without_scanning():
         with pytest.raises(asyncio.CancelledError):
             await scheduler.run_forever()
 
-        assert loader_calls == [60, 30]
+        assert loader_calls == [60, 30, 30]
         assert scanner.calls == 1
         assert scheduler.settings_changed.is_set() is False
 
@@ -168,7 +170,7 @@ class SlowScanner:
         self.calls = 0
         self.release = asyncio.Event()
 
-    async def run_once(self):
+    async def run_once(self, settings):
         self.calls += 1
         await self.release.wait()
 
@@ -191,6 +193,43 @@ class CancellingScanner:
     def __init__(self):
         self.calls = 0
 
-    async def run_once(self):
+    async def run_once(self, settings):
         self.calls += 1
         raise asyncio.CancelledError
+
+
+def test_scheduler_loads_one_snapshot_immediately_before_scan():
+    scanner = RecordingScanner()
+    settings = snapshot(30)
+    loader_calls = 0
+
+    def load_settings():
+        nonlocal loader_calls
+        loader_calls += 1
+        return settings
+
+    scheduler = MessagePushScheduler(scanner, settings_loader=load_settings)
+
+    assert asyncio.run(scheduler.run_once_if_idle()) is True
+
+    assert loader_calls == 1
+    assert scanner.calls == 1
+    assert scanner.settings == [settings]
+    assert scanner.settings[0] is settings
+
+
+def test_settings_read_failure_does_not_scan(caplog):
+    scanner = RecordingScanner()
+
+    def fail_to_load_settings():
+        raise RuntimeError("database unavailable")
+
+    scheduler = MessagePushScheduler(
+        scanner,
+        settings_loader=fail_to_load_settings,
+    )
+
+    assert asyncio.run(scheduler.run_once_if_idle()) is False
+
+    assert scanner.calls == 0
+    assert "message_push_settings_read result=error" in caplog.text

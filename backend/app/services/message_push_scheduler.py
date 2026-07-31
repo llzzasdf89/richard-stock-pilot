@@ -96,7 +96,12 @@ class MessagePushScheduler:
             return False
         async with self._round_lock:
             try:
-                await self.scanner.run_once()
+                settings = self.settings_loader()
+            except Exception:
+                logger.exception("message_push_settings_read result=error")
+                return False
+            try:
+                await self.scanner.run_once(settings)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -126,20 +131,33 @@ async def start_message_push(app: Any) -> None:
 
     longbridge = LongbridgeService()
     cache_service = MessagePushCacheService(longbridge)
-    now = datetime.now(timezone.utc)
-    for market in ("US", "HK"):
-        try:
-            if cache_service.is_trading_day(market, now):
-                await cache_service.prepare_market(market, now)
-        except Exception:
-            logger.exception("message_push_start market=%s result=error", market)
-
-    scanner = MessagePushScanService(cache_service, longbridge, sender)
     session_factory = app.state.session_factory
 
     def load_settings() -> MessagePushSettingsSnapshot:
         with session_factory() as session:
             return get_message_push_settings(session)
+
+    now = datetime.now(timezone.utc)
+    trading_markets: list[str] = []
+    for market in ("US", "HK"):
+        try:
+            if cache_service.is_trading_day(market, now):
+                trading_markets.append(market)
+        except Exception:
+            logger.exception("message_push_start market=%s result=error", market)
+    if trading_markets:
+        try:
+            warmup_settings = load_settings()
+        except Exception:
+            logger.exception("message_push_settings_read result=error")
+        else:
+            for market in trading_markets:
+                try:
+                    await cache_service.prepare_market(market, now, warmup_settings)
+                except Exception:
+                    logger.exception("message_push_start market=%s result=error", market)
+
+    scanner = MessagePushScanService(cache_service, longbridge, sender)
 
     scheduler = MessagePushScheduler(scanner, settings_loader=load_settings)
     app.state.message_push_cache_service = cache_service
