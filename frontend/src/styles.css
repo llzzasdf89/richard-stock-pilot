@@ -79,6 +79,29 @@ body {
   margin: 16px;
 }
 
+.message-push-settings {
+  padding: 16px;
+}
+
+.message-push-settings > .ant-card {
+  margin: 0 auto;
+  max-width: 760px;
+}
+
+.settings-control {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-value {
+  color: #17202a;
+  justify-self: end;
+}
+
+.settings-error {
+  margin-bottom: 16px;
+}
+
 .stock-symbol {
   color: #0f636d;
 }

@@ -5,7 +5,7 @@ import {
   fetchIntradayScreenings,
   type ScreeningFilters as ScreeningFilterValues,
   type ScreeningPayload,
-  type TabKey
+  type ScreeningTabKey
 } from "../api";
 import { AVG_VOLUME_SPEC, MARKET_CAP_SPEC } from "../filterSpecifications";
 import ScreeningFilters from "./ScreeningFilters";
@@ -26,7 +26,7 @@ export interface ScreeningStatus {
 }
 
 interface ScreeningWorkspaceProps {
-  mode: TabKey;
+  mode: ScreeningTabKey;
   onStatusChange?: (status: ScreeningStatus) => void;
 }
 

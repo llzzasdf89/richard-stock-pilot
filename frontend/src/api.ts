@@ -1,5 +1,6 @@
 export type Market = "US" | "HK";
-export type TabKey = "daily" | "intraday";
+export type ScreeningTabKey = "daily" | "intraday";
+export type TabKey = ScreeningTabKey | "settings";
 
 export interface ScreeningFilters {
   market: Market;
