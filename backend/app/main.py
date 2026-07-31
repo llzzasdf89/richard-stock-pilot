@@ -12,6 +12,7 @@ from app.response import api_error, json_200
 from app.services.message_push_scheduler import start_message_push, stop_message_push
 from app.views.daily_screening_view import router as daily_router
 from app.views.intraday_screening_view import router as intraday_router
+from app.views.message_push_settings_view import router as message_push_settings_router
 
 
 @asynccontextmanager
@@ -29,6 +30,7 @@ app.state.session_factory = SessionLocal
 app.add_middleware(RequestLoggingMiddleware)
 app.include_router(daily_router)
 app.include_router(intraday_router)
+app.include_router(message_push_settings_router)
 
 
 @app.exception_handler(RequestValidationError)
