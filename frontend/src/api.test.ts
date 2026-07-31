@@ -30,7 +30,9 @@ describe("message push settings API", () => {
     await expect(fetchMessagePushSettings()).resolves.toEqual(savedSettings);
     expect(fetch).toHaveBeenCalledWith(
       "/api/message-push-settings",
-      expect.objectContaining({ headers: expect.any(Object) })
+      expect.objectContaining({
+        headers: expect.objectContaining({ "X-Request-ID": expect.any(String) })
+      })
     );
   });
 
@@ -44,6 +46,7 @@ describe("message push settings API", () => {
       "/api/message-push-settings",
       expect.objectContaining({
         method: "PUT",
+        headers: expect.objectContaining({ "X-Request-ID": expect.any(String) }),
         body: JSON.stringify({
           interval_minutes: 30,
           min_market_cap: 250_000_000_000,
