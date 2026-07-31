@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 from math import ceil
 from typing import Any
@@ -183,6 +184,7 @@ def get_intraday_screenings(
         raise ValueError("page and page_size must be positive")
 
     provider = longbridge or LongbridgeService()
+    query_time = datetime.now(timezone.utc)
     securities = [
         security
         for market_name in _markets(market)
@@ -224,7 +226,7 @@ def get_intraday_screenings(
         latest_time = latest_quote.time if latest_quote is not None else bars[-1].time
         refreshed_at = latest_time.isoformat()
         row_market = "US" if security.symbol.endswith(".US") else "HK"
-        evaluation_date = _market_date(latest_time, row_market)
+        evaluation_date = _market_date(query_time, row_market)
         historical_daily_bars = [
             bar
             for bar in daily_bars

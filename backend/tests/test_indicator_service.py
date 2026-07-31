@@ -116,9 +116,45 @@ def test_calculate_historical_setup_identifies_down_and_flat_ma20():
     flat = calculate_historical_setup(_daily_bars([100.0] * 25), 100)
 
     assert down.ma20_direction == "下降"
-    assert flat.ma20_direction == "需人工判断"
+    assert flat.ma20_direction == "横盘"
     assert flat.has_reversal_trend == "否"
     assert flat.is_suitable_for_entry == "否"
+
+
+@pytest.mark.parametrize(
+    ("older_close", "newer_close", "expected_direction"),
+    [
+        (100.0, 101.0, "上升"),
+        (101.0, 100.0, "下降"),
+        (100.0, 100.4, "横盘"),
+        (100.4, 100.0, "横盘"),
+        (100.0, 100.2, "横盘"),
+    ],
+)
+def test_calculate_historical_setup_normalizes_ma20_direction_by_atr14(
+    older_close,
+    newer_close,
+    expected_direction,
+):
+    result = calculate_historical_setup(
+        _daily_bars([older_close] * 5 + [newer_close] * 20, spread=0.5),
+        current_price=newer_close,
+    )
+
+    assert result.atr14 == pytest.approx(1)
+    assert result.ma20_direction == expected_direction
+
+
+def test_calculate_historical_setup_returns_dash_direction_when_atr14_is_zero():
+    result = calculate_historical_setup(
+        _daily_bars([100.0] * 25, spread=0),
+        current_price=100,
+    )
+
+    assert result.atr14 == 0
+    assert result.ma20_direction == "-"
+    assert result.has_reversal_trend == "否"
+    assert result.is_suitable_for_entry == "否"
 
 
 def test_calculate_true_range_uses_standard_maximum():

@@ -144,12 +144,6 @@ def calculate_historical_setup(
 
     comparison_ma20 = sum(closes[-25:-5]) / 20
     ma_delta = current_ma20 - comparison_ma20
-    if ma_delta > 0:
-        ma20_direction = "上升"
-    elif ma_delta < 0:
-        ma20_direction = "下降"
-    else:
-        ma20_direction = "需人工判断"
 
     atr_bars = normalized[-14:]
     previous_close = normalized[-15].close
@@ -158,6 +152,16 @@ def calculate_historical_setup(
         true_ranges.append(calculate_true_range(bar.high, bar.low, previous_close))
         previous_close = bar.close
     atr14 = sum(true_ranges) / 14
+    if atr14 == 0:
+        ma20_direction = "-"
+    else:
+        trend_value = ma_delta / atr14
+        if trend_value > 0.1 and not isclose(trend_value, 0.1):
+            ma20_direction = "上升"
+        elif trend_value < -0.1 and not isclose(trend_value, -0.1):
+            ma20_direction = "下降"
+        else:
+            ma20_direction = "横盘"
     previous_10d_low = min(bar.low for bar in normalized[-10:])
     previous_10d_high = max(bar.high for bar in normalized[-10:])
     long_z_extreme = z_score < -1.5 or isclose(z_score, -1.5)

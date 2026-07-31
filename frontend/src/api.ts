@@ -25,7 +25,7 @@ export interface ScreeningRow {
   boll_upper: number;
   boll_mid: number;
   boll_lower: number;
-  ma20_direction: "上升" | "下降" | "需人工判断" | null;
+  ma20_direction: "上升" | "下降" | "横盘" | "-" | null;
   z_score: number | null;
   atr14: number | null;
   previous_10d_low: number | null;

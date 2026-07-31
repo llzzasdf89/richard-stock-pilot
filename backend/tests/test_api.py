@@ -323,8 +323,16 @@ def test_intraday_screenings_passes_slider_filters_to_longbridge_screener(monkey
 
 
 def test_intraday_screenings_returns_previous_close_and_latest_session_price(monkeypatch):
+    from app.services import screening_service
+
     earnings_calls: list[tuple[list[str], str]] = []
     daily_bar_calls: list[str] = []
+
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = cls(2026, 7, 23, 14, tzinfo=timezone.utc)
+            return value if tz is None else value.astimezone(tz)
 
     class FakeLongbridge:
         def screen_securities(self, market, min_market_cap, min_avg_volume):
@@ -355,10 +363,10 @@ def test_intraday_screenings_returns_previous_close_and_latest_session_price(mon
                 *completed,
                 MarketDataBar(
                     time=datetime(2026, 7, 22, 20, tzinfo=timezone.utc),
-                    open=1000,
-                    high=1100,
-                    low=1,
-                    close=1000,
+                    open=126,
+                    high=127,
+                    low=125,
+                    close=126,
                     volume=20_000_000,
                     turnover=Decimal("100000000"),
                 ),
@@ -373,7 +381,7 @@ def test_intraday_screenings_returns_previous_close_and_latest_session_price(mon
         def get_latest_quotes(self, symbols):
             now = datetime(2026, 7, 22, 14, 30, tzinfo=timezone.utc)
             return {
-                symbol: LatestQuote(symbol=symbol, price=125, previous_close=99, time=now, session="overnight")
+                symbol: LatestQuote(symbol=symbol, price=127.5, previous_close=99, time=now, session="overnight")
                 for symbol in symbols
             }
 
@@ -381,7 +389,8 @@ def test_intraday_screenings_returns_previous_close_and_latest_session_price(mon
             earnings_calls.append((list(symbols), market))
             return {"AAPL.US": date(2026, 7, 23)}
 
-    monkeypatch.setattr("app.services.screening_service.LongbridgeService", lambda: FakeLongbridge())
+    monkeypatch.setattr(screening_service, "datetime", FixedDatetime, raising=False)
+    monkeypatch.setattr(screening_service, "LongbridgeService", lambda: FakeLongbridge())
     client, _ = build_client(monkeypatch)
 
     response = client.get(
@@ -415,16 +424,16 @@ def test_intraday_screenings_returns_previous_close_and_latest_session_price(mon
     assert body["success"] is True
     assert body["data"]["total"] == 1
     assert row["close"] == 99
-    assert row["latest_price"] == 125
-    assert row["boll_mid"] == 115.5
+    assert row["latest_price"] == 127.5
+    assert row["boll_mid"] == 116.5
     assert row["latest_price"] < row["boll_upper"]
-    assert row["z_score"] == pytest.approx((125 - 115.5) / ((665 / 20) ** 0.5))
+    assert row["z_score"] == pytest.approx((127.5 - 116.5) / ((665 / 20) ** 0.5))
     assert "signal_type" not in row
     assert "break_percent" not in row
     assert row["ma20_direction"] == "上升"
     assert row["atr14"] == 2
-    assert row["previous_10d_low"] == 115
-    assert row["previous_10d_high"] == 126
+    assert row["previous_10d_low"] == 116
+    assert row["previous_10d_high"] == 127
     assert row["has_reversal_trend"] == "否"
     assert row["is_suitable_for_entry"] == "否"
     assert row["earnings_date"] == "2026-07-23"

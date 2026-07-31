@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from app.services.indicator_service import HistoricalSetup
 from app.services.longbridge_service import LatestQuote, MarketDataBar, Security
@@ -84,6 +85,17 @@ class FakeCache:
                     turnover=Decimal("2000000000"),
                 )
             )
+        bars.append(
+            MarketDataBar(
+                time=datetime(2026, 7, 30, 20, tzinfo=timezone.utc),
+                open=120,
+                high=121,
+                low=119,
+                close=120,
+                volume=20_000_000,
+                turnover=Decimal("2000000000"),
+            )
+        )
         return [security], {symbol: bars}
 
 
@@ -121,3 +133,18 @@ def test_run_once_sends_one_message_per_matching_stock_for_both_markets():
     assert [summary.market for summary in summaries] == ["US", "HK"]
     assert [summary.sent for summary in summaries] == [1, 1]
     assert len(sender.messages) == 2
+
+
+def test_scan_market_uses_scan_date_when_latest_quote_is_from_previous_day():
+    sender = FakeSender()
+    service = MessagePushScanService(FakeCache(), FakeLongbridge(), sender)
+
+    summary = asyncio.run(
+        service.scan_market(
+            "US",
+            datetime(2026, 7, 31, 15, tzinfo=ZoneInfo("America/New_York")),
+        )
+    )
+
+    assert summary.sent == 1
+    assert "布林中轨：110.50" in sender.messages[0][1]

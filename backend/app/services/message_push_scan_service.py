@@ -109,7 +109,7 @@ class MessagePushScanService:
                 bars = bars_by_symbol.get(security.symbol, [])
                 if quote is None:
                     continue
-                evaluation_date = _market_date(quote.time, market)
+                evaluation_date = _market_date(china_now, market)
                 historical = [
                     DailyPriceBar(
                         trade_date=_market_date(bar.time, market),
