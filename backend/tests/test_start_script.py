@@ -113,3 +113,53 @@ exit 0
     assert result.returncode != 0
     assert "DAILY_SYNC_SYMBOLS 未配置" not in result.stderr
     assert "--markets US HK" in log
+
+
+def test_start_script_passes_custom_backend_port_to_frontend(tmp_path) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    command_log = tmp_path / "commands.log"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_uv = fake_bin / "uv"
+    fake_npm = fake_bin / "npm"
+    fake_uv.write_text(
+        """#!/usr/bin/env bash
+if [[ "$*" == "run python -m app.scripts.has_daily_screening_data" ]]; then
+  exit 0
+fi
+if [[ "$*" == run\\ uvicorn* ]]; then
+  sleep 1
+fi
+exit 0
+""",
+        encoding="utf-8",
+    )
+    fake_npm.write_text(
+        """#!/usr/bin/env bash
+if [[ "$*" == run\\ dev* ]]; then
+  echo "frontend-backend-port=${VITE_BACKEND_PORT:-missing}" >> "${START_SCRIPT_TEST_LOG}"
+fi
+exit 0
+""",
+        encoding="utf-8",
+    )
+    fake_uv.chmod(0o755)
+    fake_npm.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["START_SCRIPT_TEST_LOG"] = str(command_log)
+    env["BACKEND_PORT"] = "8010"
+
+    result = subprocess.run(
+        [str(repo_root / "start.sh")],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert command_log.read_text(encoding="utf-8") == "frontend-backend-port=8010\n"

@@ -133,7 +133,7 @@ start_frontend() {
   log "启动前端：http://127.0.0.1:${FRONTEND_PORT}"
   (
     cd "${FRONTEND_DIR}"
-    npm run dev -- --host 127.0.0.1 --port "${FRONTEND_PORT}"
+    VITE_BACKEND_PORT="${BACKEND_PORT}" npm run dev -- --host 127.0.0.1 --port "${FRONTEND_PORT}"
   ) &
   FRONTEND_PID="$!"
 }
