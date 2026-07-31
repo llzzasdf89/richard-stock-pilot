@@ -7,9 +7,11 @@ Richard Stock Pilot is a React + FastAPI stock screening app for US and HK stock
 - Daily screening: reads stored daily metrics from SQLite.
 - Intraday screening: discovers Longbridge screener indicators, runs screener search with the slider filters, then fetches daily and intraday bars for local Z-Score and reference Bollinger calculations.
 - Chinese UI.
-- Two application APIs:
+- Four application APIs:
   - `GET /api/daily-screenings`
   - `GET /api/intraday-screenings`
+  - `GET /api/message-push-settings`
+  - `PUT /api/message-push-settings`
 - Unified API response body:
 
 ```json
@@ -69,7 +71,7 @@ MESSAGE_PUSH_PROVIDER=pushplus
 PUSHPLUS_TOKEN=your PushPlus token
 ```
 
-开启后，FastAPI 启动时分别预热美股和港股的历史日 K 缓存，并在每个中国时间整点重新筛选。只有符合 Z-Score 建仓条件的股票才会通过 PushPlus 逐只发送；没有匹配股票时不会发送消息。
+开启后，FastAPI 启动时分别预热美股和港股的历史日 K 缓存。后台消息设置页可保存 10–120 分钟（步长 10 分钟）的推送间隔，以及最低市值和最低月均成交量。调度点每天以中国时间 `00:00` 为基准按所选间隔固定对齐；不能整除一天的间隔也会在跨日时重新从次日 `00:00` 对齐。保存设置不会立即扫描，而是从严格晚于保存时刻的下一个固定调度点生效。只有符合 Z-Score 建仓条件的股票才会通过 PushPlus 逐只发送；没有匹配股票时不会发送消息。
 
 本功能不需要公网 IP 或域名，本地电脑也可以运行。电脑必须保持开机、联网且不进入休眠。后台定时任务第一版只支持单 Worker；不要同时启动多个 FastAPI Worker，否则会重复扫描和推送。
 
@@ -160,6 +162,21 @@ Intraday:
 
 ```http
 GET /api/intraday-screenings?market=all&min_market_cap=200000000000&min_avg_volume=10000000&interval=5m&page=1&page_size=50
+```
+
+Message push settings:
+
+```http
+GET /api/message-push-settings
+
+PUT /api/message-push-settings
+Content-Type: application/json
+
+{
+  "interval_minutes": 30,
+  "min_market_cap": 250000000000,
+  "min_avg_volume": 12000000
+}
 ```
 
 ## Out Of Scope For V1

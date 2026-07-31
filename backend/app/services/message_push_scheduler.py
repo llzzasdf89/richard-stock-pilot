@@ -24,6 +24,7 @@ from app.services.pushplus_message_service import (
 
 logger = logging.getLogger(__name__)
 CHINA_TIMEZONE = ZoneInfo("Asia/Shanghai")
+SCHEDULE_RETRY_DELAY_SECONDS = 60.0
 WaitResult = Literal["boundary", "settings_changed"]
 
 
@@ -38,6 +39,7 @@ def seconds_until_next_china_boundary(
     elapsed_minutes = (china_now - midnight).total_seconds() / 60
     boundary_index = math.floor(elapsed_minutes / interval_minutes) + 1
     next_boundary = midnight + timedelta(minutes=boundary_index * interval_minutes)
+    next_boundary = min(next_boundary, midnight + timedelta(days=1))
     return (next_boundary - china_now).total_seconds()
 
 
@@ -111,13 +113,34 @@ class MessagePushScheduler:
     async def run_forever(self) -> None:
         self._event_loop = asyncio.get_running_loop()
         while True:
-            settings = self.settings_loader()
-            delay = seconds_until_next_china_boundary(settings.interval_minutes)
+            try:
+                settings = self.settings_loader()
+            except Exception:
+                logger.exception("message_push_settings_read result=error")
+                await self._wait_before_schedule_retry()
+                continue
+            try:
+                delay = seconds_until_next_china_boundary(settings.interval_minutes)
+            except Exception:
+                logger.exception(
+                    "message_push_schedule result=error interval_minutes=%r",
+                    settings.interval_minutes,
+                )
+                await self._wait_before_schedule_retry()
+                continue
             wait_result = await self.wait_for_next(delay, self.settings_changed)
             if wait_result == "settings_changed":
                 self.settings_changed.clear()
                 continue
             await self.run_once_if_idle()
+
+    async def _wait_before_schedule_retry(self) -> None:
+        wait_result = await self.wait_for_next(
+            SCHEDULE_RETRY_DELAY_SECONDS,
+            self.settings_changed,
+        )
+        if wait_result == "settings_changed":
+            self.settings_changed.clear()
 
 
 async def start_message_push(app: Any) -> None:
@@ -177,4 +200,7 @@ async def stop_message_push(app: Any) -> None:
         await task
     except asyncio.CancelledError:
         pass
+    except Exception:
+        logger.exception("message_push_stop result=error")
+        return
     logger.info("message_push_stop result=success")

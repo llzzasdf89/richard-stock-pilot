@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from sqlalchemy import insert
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.message_push_setting import MessagePushSetting
@@ -37,20 +41,10 @@ class MessagePushSettingsSnapshot:
 def get_message_push_settings(session: Session) -> MessagePushSettingsSnapshot:
     row = session.get(MessagePushSetting, SETTINGS_ID)
     if row is None:
-        row = MessagePushSetting(
-            id=SETTINGS_ID,
-            interval_minutes=DEFAULT_INTERVAL_MINUTES,
-            min_market_cap=DEFAULT_MIN_MARKET_CAP,
-            min_avg_volume=DEFAULT_MIN_AVG_VOLUME,
-            updated_at=datetime.now(timezone.utc),
-        )
-        session.add(row)
-        try:
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        session.refresh(row)
+        _create_default_settings_if_missing(session)
+        row = session.get(MessagePushSetting, SETTINGS_ID)
+        if row is None:
+            raise RuntimeError("message push settings singleton was not created")
     return _snapshot_from_row(row)
 
 
@@ -101,10 +95,45 @@ def _validate_threshold(
         raise ValueError(f"{name} is out of range or not aligned to its step")
 
 
+def _create_default_settings_if_missing(session: Session) -> None:
+    values = {
+        "id": SETTINGS_ID,
+        "interval_minutes": DEFAULT_INTERVAL_MINUTES,
+        "min_market_cap": DEFAULT_MIN_MARKET_CAP,
+        "min_avg_volume": DEFAULT_MIN_AVG_VOLUME,
+        "updated_at": datetime.now(timezone.utc),
+    }
+    dialect_name = session.get_bind().dialect.name
+    if dialect_name == "sqlite":
+        statement = sqlite_insert(MessagePushSetting).values(**values)
+        statement = statement.on_conflict_do_nothing(index_elements=["id"])
+    elif dialect_name == "postgresql":
+        statement = postgresql_insert(MessagePushSetting).values(**values)
+        statement = statement.on_conflict_do_nothing(index_elements=["id"])
+    else:
+        statement = insert(MessagePushSetting).values(**values)
+
+    try:
+        session.execute(statement)
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        if session.get(MessagePushSetting, SETTINGS_ID) is None:
+            raise
+    except Exception:
+        session.rollback()
+        raise
+
+
 def _snapshot_from_row(row: MessagePushSetting) -> MessagePushSettingsSnapshot:
-    return MessagePushSettingsSnapshot(
+    updated_at = row.updated_at
+    if updated_at is not None and updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    snapshot = MessagePushSettingsSnapshot(
         interval_minutes=row.interval_minutes,
         min_market_cap=row.min_market_cap,
         min_avg_volume=row.min_avg_volume,
-        updated_at=row.updated_at,
+        updated_at=updated_at,
     )
+    _validate(snapshot)
+    return snapshot

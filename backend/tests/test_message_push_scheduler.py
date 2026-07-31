@@ -25,6 +25,13 @@ def test_seconds_until_next_china_boundary(now, interval, seconds):
     assert scheduler_module.seconds_until_next_china_boundary(interval, now) == seconds
 
 
+@pytest.mark.parametrize("interval", [50, 70, 100, 110])
+def test_non_divisor_intervals_reanchor_at_next_china_midnight(interval):
+    now = datetime(2026, 7, 31, 23, 50, tzinfo=CHINA_TIMEZONE)
+
+    assert scheduler_module.seconds_until_next_china_boundary(interval, now) == 600
+
+
 def snapshot(interval_minutes: int) -> MessagePushSettingsSnapshot:
     return MessagePushSettingsSnapshot(
         interval_minutes=interval_minutes,
@@ -233,3 +240,73 @@ def test_settings_read_failure_does_not_scan(caplog):
 
     assert scanner.calls == 0
     assert "message_push_settings_read result=error" in caplog.text
+
+
+def test_run_forever_waits_and_retries_after_settings_read_failure(caplog):
+    async def scenario():
+        scanner = RecordingScanner()
+        loader_calls = 0
+        retry_delays = []
+
+        def load_settings():
+            nonlocal loader_calls
+            loader_calls += 1
+            if loader_calls == 1:
+                raise RuntimeError("database unavailable")
+            raise asyncio.CancelledError
+
+        async def wait_for_retry(delay, settings_changed):
+            retry_delays.append(delay)
+            return "boundary"
+
+        scheduler = MessagePushScheduler(
+            scanner,
+            settings_loader=load_settings,
+            wait_for_next=wait_for_retry,
+        )
+
+        with pytest.raises(asyncio.CancelledError):
+            await scheduler.run_forever()
+
+        assert loader_calls == 2
+        assert len(retry_delays) == 1
+        assert retry_delays[0] > 0
+        assert scanner.calls == 0
+
+    asyncio.run(scenario())
+
+    assert "message_push_settings_read result=error" in caplog.text
+
+
+def test_run_forever_waits_and_retries_after_boundary_calculation_failure(caplog):
+    async def scenario():
+        scanner = RecordingScanner()
+        loaded_intervals = iter((0, None))
+        retry_delays = []
+
+        def load_settings():
+            interval = next(loaded_intervals)
+            if interval is None:
+                raise asyncio.CancelledError
+            return snapshot(interval)
+
+        async def wait_for_retry(delay, settings_changed):
+            retry_delays.append(delay)
+            return "boundary"
+
+        scheduler = MessagePushScheduler(
+            scanner,
+            settings_loader=load_settings,
+            wait_for_next=wait_for_retry,
+        )
+
+        with pytest.raises(asyncio.CancelledError):
+            await scheduler.run_forever()
+
+        assert len(retry_delays) == 1
+        assert retry_delays[0] > 0
+        assert scanner.calls == 0
+
+    asyncio.run(scenario())
+
+    assert "message_push_schedule result=error" in caplog.text

@@ -1,3 +1,4 @@
+from datetime import datetime
 import threading
 
 import pytest
@@ -35,6 +36,14 @@ def test_get_returns_persisted_settings(client):
     assert body["success"] is True
     assert body["data"]["interval_minutes"] == 60
     assert body["data"]["min_market_cap"] == 200000000000
+
+
+def test_get_updated_at_includes_timezone_offset(client):
+    body = client.get("/api/message-push-settings").json()
+
+    updated_at = datetime.fromisoformat(body["data"]["updated_at"])
+
+    assert updated_at.utcoffset() is not None
 
 
 def test_put_saves_full_settings_and_notifies_scheduler(client, scheduler):

@@ -80,3 +80,19 @@ def test_enabled_message_push_loads_settings_from_app_session_factory(monkeypatc
 
     assert opened_sessions == [session]
     assert loaded.interval_minutes == 30
+
+
+def test_stop_message_push_contains_already_failed_scheduler_task(caplog):
+    async def scenario():
+        async def fail_scheduler():
+            raise RuntimeError("scheduler crashed")
+
+        task = asyncio.create_task(fail_scheduler())
+        await asyncio.sleep(0)
+        app = SimpleNamespace(state=SimpleNamespace(message_push_task=task))
+
+        await stop_message_push(app)
+
+    asyncio.run(scenario())
+
+    assert "message_push_stop result=error" in caplog.text
