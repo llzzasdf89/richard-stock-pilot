@@ -1,5 +1,6 @@
 export type Market = "US" | "HK";
-export type TabKey = "daily" | "intraday";
+export type ScreeningTabKey = "daily" | "intraday";
+export type TabKey = ScreeningTabKey | "settings";
 
 export interface ScreeningFilters {
   market: Market;
@@ -52,6 +53,13 @@ export interface ApiResponse<T> {
   code: number;
 }
 
+export interface MessagePushSettings {
+  interval_minutes: number;
+  min_market_cap: number;
+  min_avg_volume: number;
+  updated_at?: string | null;
+}
+
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 export async function fetchDailyScreenings(filters: ScreeningFilters): Promise<ScreeningPayload> {
@@ -60,6 +68,24 @@ export async function fetchDailyScreenings(filters: ScreeningFilters): Promise<S
 
 export async function fetchIntradayScreenings(filters: ScreeningFilters): Promise<ScreeningPayload> {
   return fetchScreenings("/api/intraday-screenings", filters);
+}
+
+export async function fetchMessagePushSettings(): Promise<MessagePushSettings> {
+  return requestApi("/api/message-push-settings");
+}
+
+export async function saveMessagePushSettings(settings: MessagePushSettings): Promise<MessagePushSettings> {
+  return requestApi("/api/message-push-settings", {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      interval_minutes: settings.interval_minutes,
+      min_market_cap: settings.min_market_cap,
+      min_avg_volume: settings.min_avg_volume
+    })
+  });
 }
 
 async function fetchScreenings(path: string, filters: ScreeningFilters): Promise<ScreeningPayload> {
@@ -75,18 +101,24 @@ async function fetchScreenings(path: string, filters: ScreeningFilters): Promise
     params.set("interval", filters.interval);
   }
 
+  return requestApi(`${path}?${params.toString()}`);
+}
+
+async function requestApi<T>(path: string, init: RequestInit = {}): Promise<T> {
   const requestId = crypto.randomUUID();
-  const response = await fetch(`${API_BASE}${path}?${params.toString()}`, {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
     headers: {
+      ...init.headers,
       "X-Request-ID": requestId
     }
   });
-  const body = (await response.json()) as ApiResponse<ScreeningPayload | { message: string; request_id: string }>;
+  const body = (await response.json()) as ApiResponse<T | { message: string; request_id: string }>;
 
   if (!body.success || body.code !== 200) {
     const errorData = body.data as { message?: string; request_id?: string };
     throw new Error(`${errorData.message ?? "请求失败"}，请求ID：${errorData.request_id ?? requestId}`);
   }
 
-  return body.data as ScreeningPayload;
+  return body.data as T;
 }
